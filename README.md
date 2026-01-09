@@ -94,6 +94,18 @@ sudo ./neuroimaging_installer.sh -a -y
 # Dopo l'installazione, usa lo script helper
 ~/neuroimaging/bin/run_fmriprep.sh -b /data/bids -o /data/derivatives -p sub-01
 
+# Installa l'intera suite NiPreps
+./neuroimaging_installer.sh -p -q -e
+
+# Prima esegui MRIQC per quality control
+~/neuroimaging/bin/run_mriqc.sh -b /data/bids -o /data/mriqc
+
+# Poi esegui fMRIPrep per preprocessing completo
+~/neuroimaging/bin/run_fmriprep.sh -b /data/bids -o /data/derivatives -p sub-01
+
+# Oppure solo sMRIPrep per anatomical
+~/neuroimaging/bin/run_smriprep.sh -b /data/bids -o /data/derivatives -p sub-01
+
 ### 3. Con Docker (Consigliato per riproducibilità)
 # Build dell'immagine
 docker build -t neuroimaging:latest .
