@@ -39,6 +39,8 @@ MINICONDA_VERSION="latest"
 C3D_VERSION="1.4.0"
 CONN_VERSION="22.a"
 FMRIPREP_VERSION="24.1.1"
+MRIQC_VERSION="24.0.2"
+SMRIPREP_VERSION="0.15.0"
 
 # URL download
 declare -A DOWNLOAD_URLS=(
@@ -68,6 +70,8 @@ declare -A INSTALL_SOFTWARE=(
     ["conn"]=false
     ["micromamba"]=false
     ["fmriprep"]=false
+    ["mriqc"]=false
+    ["smriprep"]=false
 )
 
 # ============================================================================
@@ -628,6 +632,96 @@ install_fmriprep_docker() {
     print_message "Script helper: ${INSTALL_DIR}/bin/run_fmriprep.sh"
 }
 
+install_mriqc_docker() {
+    print_header "CONFIGURAZIONE MRIQC-DOCKER"
+    
+    # Verifica Docker
+    if ! command_exists docker; then
+        print_error "Docker non trovato. Installazione Docker..."
+        install_docker
+    fi
+    
+    # Verifica che Docker sia in esecuzione
+    if ! docker info >/dev/null 2>&1; then
+        print_warning "Docker non è in esecuzione. Avvio Docker..."
+        sudo systemctl start docker
+        sleep 3
+    fi
+    
+    # Pre-download dell'immagine Docker di MRIQC
+    local mriqc_version="${MRIQC_VERSION}"
+    
+    if [ "$SILENT_MODE" = false ]; then
+        read -p "Scaricare l'immagine Docker di MRIQC ${mriqc_version}? (s/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Ss]$ ]]; then
+            print_message "Download immagine MRIQC ${mriqc_version}..."
+            docker pull nipreps/mriqc:${mriqc_version}
+            print_success "Immagine MRIQC scaricata"
+        fi
+    fi
+    
+    # Configura variabili d'ambiente
+    backup_config ~/.bashrc
+    echo "" >> ~/.bashrc
+    echo "# MRIQC Configuration" >> ~/.bashrc
+    echo "export MRIQC_VERSION=\"${mriqc_version}\"" >> ~/.bashrc
+    
+    # Crea script helper per MRIQC
+    create_mriqc_helper_script
+    
+    print_success "MRIQC-Docker configurato"
+    print_message "Versione: ${mriqc_version}"
+    print_message "Script helper: ${INSTALL_DIR}/bin/run_mriqc.sh"
+}
+
+install_smriprep_docker() {
+    print_header "CONFIGURAZIONE SMRIPREP-DOCKER"
+    
+    # Verifica Docker
+    if ! command_exists docker; then
+        print_error "Docker non trovato. Installazione Docker..."
+        install_docker
+    fi
+    
+    # Verifica che Docker sia in esecuzione
+    if ! docker info >/dev/null 2>&1; then
+        print_warning "Docker non è in esecuzione. Avvio Docker..."
+        sudo systemctl start docker
+        sleep 3
+    fi
+    
+    # Pre-download dell'immagine Docker di sMRIPrep
+    local smriprep_version="${SMRIPREP_VERSION}"
+    
+    if [ "$SILENT_MODE" = false ]; then
+        read -p "Scaricare l'immagine Docker di sMRIPrep ${smriprep_version}? (s/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Ss]$ ]]; then
+            print_message "Download immagine sMRIPrep ${smriprep_version}..."
+            docker pull nipreps/smriprep:${smriprep_version}
+            print_success "Immagine sMRIPrep scaricata"
+        fi
+    fi
+    
+    # Crea directory per TemplateFlow se non esiste
+    local templateflow_dir="${INSTALL_DIR}/templateflow"
+    mkdir -p "$templateflow_dir"
+    
+    # Configura variabili d'ambiente
+    backup_config ~/.bashrc
+    echo "" >> ~/.bashrc
+    echo "# sMRIPrep Configuration" >> ~/.bashrc
+    echo "export SMRIPREP_VERSION=\"${smriprep_version}\"" >> ~/.bashrc
+    
+    # Crea script helper per sMRIPrep
+    create_smriprep_helper_script
+    
+    print_success "sMRIPrep-Docker configurato"
+    print_message "Versione: ${smriprep_version}"
+    print_message "Script helper: ${INSTALL_DIR}/bin/run_smriprep.sh"
+}
+
 create_fmriprep_helper_script() {
     local helper_script="${INSTALL_DIR}/bin/run_fmriprep.sh"
     
@@ -828,6 +922,266 @@ FMRIPREP_SCRIPT
     chmod +x "$helper_script"
     
     print_success "Script helper creato: $helper_script"
+}
+
+create_mriqc_helper_script() {
+    local helper_script="${INSTALL_DIR}/bin/run_mriqc.sh"
+    
+    mkdir -p "${INSTALL_DIR}/bin"
+    
+    cat > "$helper_script" << 'MRIQC_SCRIPT'
+#!/bin/bash
+
+# ============================================================================
+# MRIQC DOCKER HELPER SCRIPT
+# ============================================================================
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+print_usage() {
+    cat << EOF
+Uso: $(basename "$0") [opzioni]
+
+Script helper per eseguire MRIQC con Docker
+
+Opzioni:
+    -b, --bids-dir DIR          Directory BIDS input (richiesto)
+    -o, --output-dir DIR        Directory output (richiesto)
+    -p, --participant-label ID  Partecipante da processare (opzionale)
+    -w, --work-dir DIR          Directory di lavoro (default: ./work)
+    -v, --version VERSION       Versione MRIQC (default: da \$MRIQC_VERSION)
+    --modality TYPE             Modalità: T1w, bold, T2w (default: tutte)
+    --mem MB                    Memoria massima (default: 16000)
+    --n-cpus N                  Numero CPU (default: auto)
+    -h, --help                  Mostra questo messaggio
+
+Esempio:
+    $(basename "$0") -b /data/bids -o /data/mriqc_out -p sub-01
+
+EOF
+}
+
+BIDS_DIR=""
+OUTPUT_DIR=""
+PARTICIPANT=""
+WORK_DIR="./work"
+MRIQC_VERSION="${MRIQC_VERSION:-24.0.2}"
+MODALITY=""
+MEM_MB=16000
+N_CPUS=$(nproc)
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -b|--bids-dir) BIDS_DIR="$2"; shift 2 ;;
+        -o|--output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+        -p|--participant-label) PARTICIPANT="$2"; shift 2 ;;
+        -w|--work-dir) WORK_DIR="$2"; shift 2 ;;
+        -v|--version) MRIQC_VERSION="$2"; shift 2 ;;
+        --modality) MODALITY="--modality $2"; shift 2 ;;
+        --mem) MEM_MB="$2"; shift 2 ;;
+        --n-cpus) N_CPUS="$2"; shift 2 ;;
+        -h|--help) print_usage; exit 0 ;;
+        *) echo -e "${RED}Errore: opzione sconosciuta $1${NC}"; print_usage; exit 1 ;;
+    esac
+done
+
+if [ -z "$BIDS_DIR" ] || [ -z "$OUTPUT_DIR" ]; then
+    echo -e "${RED}Errore: --bids-dir e --output-dir sono obbligatori${NC}"
+    print_usage
+    exit 1
+fi
+
+if [ ! -d "$BIDS_DIR" ]; then
+    echo -e "${RED}Errore: BIDS directory non trovata: $BIDS_DIR${NC}"
+    exit 1
+fi
+
+mkdir -p "$OUTPUT_DIR"
+mkdir -p "$WORK_DIR"
+
+BIDS_DIR=$(realpath "$BIDS_DIR")
+OUTPUT_DIR=$(realpath "$OUTPUT_DIR")
+WORK_DIR=$(realpath "$WORK_DIR")
+
+echo -e "${BLUE}=== Configurazione MRIQC ===${NC}"
+echo "BIDS Directory: $BIDS_DIR"
+echo "Output Directory: $OUTPUT_DIR"
+echo "Work Directory: $WORK_DIR"
+echo "Participant: ${PARTICIPANT:-all}"
+echo "Version: $MRIQC_VERSION"
+echo ""
+
+CMD="docker run --rm -it \
+    -v ${BIDS_DIR}:/data:ro \
+    -v ${OUTPUT_DIR}:/out \
+    -v ${WORK_DIR}:/work \
+    nipreps/mriqc:${MRIQC_VERSION} \
+    /data /out participant \
+    --work-dir /work \
+    --mem-gb $(($MEM_MB / 1000)) \
+    --n-cpus ${N_CPUS} \
+    --verbose-reports \
+    ${MODALITY}"
+
+if [ -n "$PARTICIPANT" ]; then
+    CMD="$CMD --participant-label $PARTICIPANT"
+fi
+
+echo -e "${GREEN}Esecuzione MRIQC...${NC}"
+echo "$CMD"
+echo ""
+
+eval $CMD
+
+echo -e "${GREEN}✓ MRIQC completato!${NC}"
+echo -e "${BLUE}Report disponibile in: ${OUTPUT_DIR}${NC}"
+MRIQC_SCRIPT
+    
+    chmod +x "$helper_script"
+    print_success "Script MRIQC helper creato: $helper_script"
+}
+
+create_smriprep_helper_script() {
+    local helper_script="${INSTALL_DIR}/bin/run_smriprep.sh"
+    
+    mkdir -p "${INSTALL_DIR}/bin"
+    
+    cat > "$helper_script" << 'SMRIPREP_SCRIPT'
+#!/bin/bash
+
+# ============================================================================
+# SMRIPREP DOCKER HELPER SCRIPT
+# ============================================================================
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+print_usage() {
+    cat << EOF
+Uso: $(basename "$0") [opzioni]
+
+Script helper per eseguire sMRIPrep con Docker
+
+Opzioni:
+    -b, --bids-dir DIR          Directory BIDS input (richiesto)
+    -o, --output-dir DIR        Directory output (richiesto)
+    -p, --participant-label ID  Partecipante da processare (opzionale)
+    -w, --work-dir DIR          Directory di lavoro (default: ./work)
+    -f, --fs-license FILE       File licenza FreeSurfer
+    -v, --version VERSION       Versione sMRIPrep (default: da \$SMRIPREP_VERSION)
+    --fs-no-reconall            Salta ricostruzione FreeSurfer
+    --mem MB                    Memoria massima (default: 16000)
+    --n-cpus N                  Numero CPU (default: auto)
+    -h, --help                  Mostra questo messaggio
+
+Esempio:
+    $(basename "$0") -b /data/bids -o /data/derivatives -p sub-01
+
+EOF
+}
+
+BIDS_DIR=""
+OUTPUT_DIR=""
+PARTICIPANT=""
+WORK_DIR="./work"
+FS_LICENSE="${HOME}/neuroimaging/config/license.txt"
+SMRIPREP_VERSION="${SMRIPREP_VERSION:-0.15.0}"
+FS_NO_RECONALL=""
+MEM_MB=16000
+N_CPUS=$(nproc)
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -b|--bids-dir) BIDS_DIR="$2"; shift 2 ;;
+        -o|--output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+        -p|--participant-label) PARTICIPANT="$2"; shift 2 ;;
+        -w|--work-dir) WORK_DIR="$2"; shift 2 ;;
+        -f|--fs-license) FS_LICENSE="$2"; shift 2 ;;
+        -v|--version) SMRIPREP_VERSION="$2"; shift 2 ;;
+        --fs-no-reconall) FS_NO_RECONALL="--fs-no-reconall"; shift ;;
+        --mem) MEM_MB="$2"; shift 2 ;;
+        --n-cpus) N_CPUS="$2"; shift 2 ;;
+        -h|--help) print_usage; exit 0 ;;
+        *) echo -e "${RED}Errore: opzione sconosciuta $1${NC}"; print_usage; exit 1 ;;
+    esac
+done
+
+if [ -z "$BIDS_DIR" ] || [ -z "$OUTPUT_DIR" ]; then
+    echo -e "${RED}Errore: --bids-dir e --output-dir sono obbligatori${NC}"
+    print_usage
+    exit 1
+fi
+
+if [ ! -d "$BIDS_DIR" ]; then
+    echo -e "${RED}Errore: BIDS directory non trovata: $BIDS_DIR${NC}"
+    exit 1
+fi
+
+if [ ! -f "$FS_LICENSE" ]; then
+    echo -e "${YELLOW}Warning: Licenza FreeSurfer non trovata in $FS_LICENSE${NC}"
+    read -p "Inserisci il percorso alla licenza FreeSurfer: " FS_LICENSE
+    if [ ! -f "$FS_LICENSE" ]; then
+        echo -e "${RED}Errore: Licenza non valida${NC}"
+        exit 1
+    fi
+fi
+
+mkdir -p "$OUTPUT_DIR"
+mkdir -p "$WORK_DIR"
+
+BIDS_DIR=$(realpath "$BIDS_DIR")
+OUTPUT_DIR=$(realpath "$OUTPUT_DIR")
+WORK_DIR=$(realpath "$WORK_DIR")
+FS_LICENSE=$(realpath "$FS_LICENSE")
+
+echo -e "${BLUE}=== Configurazione sMRIPrep ===${NC}"
+echo "BIDS Directory: $BIDS_DIR"
+echo "Output Directory: $OUTPUT_DIR"
+echo "Work Directory: $WORK_DIR"
+echo "Participant: ${PARTICIPANT:-all}"
+echo "Version: $SMRIPREP_VERSION"
+echo ""
+
+CMD="docker run --rm -it \
+    -v ${BIDS_DIR}:/data:ro \
+    -v ${OUTPUT_DIR}:/out \
+    -v ${WORK_DIR}:/work \
+    -v ${FS_LICENSE}:/opt/freesurfer/license.txt:ro \
+    -v ${TEMPLATEFLOW_HOME:-$HOME/.cache/templateflow}:/home/smriprep/.cache/templateflow \
+    nipreps/smriprep:${SMRIPREP_VERSION} \
+    /data /out participant \
+    --work-dir /work \
+    --mem-mb ${MEM_MB} \
+    --n-cpus ${N_CPUS} \
+    --output-spaces MNI152NLin2009cAsym:res-native anat fsnative \
+    ${FS_NO_RECONALL}"
+
+if [ -n "$PARTICIPANT" ]; then
+    CMD="$CMD --participant-label $PARTICIPANT"
+fi
+
+echo -e "${GREEN}Esecuzione sMRIPrep...${NC}"
+echo "$CMD"
+echo ""
+
+eval $CMD
+
+echo -e "${GREEN}✓ sMRIPrep completato!${NC}"
+SMRIPREP_SCRIPT
+    
+    chmod +x "$helper_script"
+    print_success "Script sMRIPrep helper creato: $helper_script"
 }
 
 # ============================================================================
@@ -1067,6 +1421,20 @@ verify_installation() {
                         echo "✗ fMRIPrep-Docker: FAILED" | tee -a "$verification_log"
                     fi
                     ;;
+                mriqc)
+                    if command_exists docker && docker images | grep -q mriqc; then
+                        echo "✓ MRIQC-Docker: OK" | tee -a "$verification_log"
+                    else
+                        echo "✗ MRIQC-Docker: FAILED" | tee -a "$verification_log"
+                    fi
+                    ;;
+                smriprep)
+                    if command_exists docker && docker images | grep -q smriprep; then
+                        echo "✓ sMRIPrep-Docker: OK" | tee -a "$verification_log"
+                    else
+                        echo "✗ sMRIPrep-Docker: FAILED" | tee -a "$verification_log"
+                    fi
+                    ;;
             esac
         fi
     done
@@ -1089,6 +1457,8 @@ Opzioni:
     -s              Installa SPM
     -t              Installa CONN
     -p              Installa fMRIPrep-Docker
+    -q              Installa MRIQC-Docker
+    -e              Installa sMRIPrep-Docker
     -d              Crea ambiente conda
     -g              Esporta a container Docker
     -y              Modalità silenziosa
@@ -1101,6 +1471,9 @@ Esempi:
     
     # Installa solo FSL e fMRIPrep
     $(basename "$0") -f -p
+    
+    # Installa suite completa NiPreps (fMRIPrep, MRIQC, sMRIPrep)
+    $(basename "$0") -p -q -e
     
     # Installa da file di configurazione
     $(basename "$0") -u config.txt
@@ -1116,7 +1489,7 @@ main() {
     print_header "NEUROIMAGING ENVIRONMENT INSTALLER"
     
     # Parsing argomenti
-    while getopts "afnismcrtpdyhu:g:" opt; do
+    while getopts "afnismcrtpdqeyhu:g:" opt; do
         case ${opt} in
             a) INSTALL_ALL=true ;;
             f) INSTALL_SOFTWARE["fsl"]=true ;;
@@ -1128,6 +1501,8 @@ main() {
             r) INSTALL_SOFTWARE["freesurfer"]=true ;;
             t) INSTALL_SOFTWARE["conn"]=true ;;
             p) INSTALL_SOFTWARE["fmriprep"]=true ;;
+            q) INSTALL_SOFTWARE["mriqc"]=true ;;
+            e) INSTALL_SOFTWARE["smriprep"]=true ;;
             d) CREATE_CONDA_ENV=true ;;
             y) SILENT_MODE=true ;;
             u) parse_config_file "$OPTARG" ;;
@@ -1168,6 +1543,8 @@ main() {
                 conn) install_conn ;;
                 micromamba) install_micromamba ;;
                 fmriprep) install_fmriprep_docker ;;
+                mriqc) install_mriqc_docker ;;
+                smriprep) install_smriprep_docker ;;
             esac
         fi
     done
@@ -1209,6 +1586,18 @@ main() {
     if [ "${INSTALL_SOFTWARE[fmriprep]}" = true ]; then
         echo "Per eseguire fMRIPrep:"
         echo "  ${INSTALL_DIR}/bin/run_fmriprep.sh -b <bids_dir> -o <output_dir>"
+        echo ""
+    fi
+    
+    if [ "${INSTALL_SOFTWARE[mriqc]}" = true ]; then
+        echo "Per eseguire MRIQC (quality control):"
+        echo "  ${INSTALL_DIR}/bin/run_mriqc.sh -b <bids_dir> -o <output_dir>"
+        echo ""
+    fi
+    
+    if [ "${INSTALL_SOFTWARE[smriprep]}" = true ]; then
+        echo "Per eseguire sMRIPrep (anatomical preprocessing):"
+        echo "  ${INSTALL_DIR}/bin/run_smriprep.sh -b <bids_dir> -o <output_dir>"
         echo ""
     fi
     
