@@ -57,7 +57,7 @@ NET automatizza l'installazione e la configurazione di tutti i principali softwa
 - **Deep Learning**: PyTorch, MONAI, nnU-Net, HD-BET
 - **Analisi dati**: Nilearn, Dipy, Nibabel, Nipype
 - **Visualizzazione**: Mayavi, PyVista, Matplotlib 3D
-- **Pipeline**: fMRIPrep, QSIPrep, MRIQC
+- **Pipeline**: fMRIPrep
 
 ---
 
