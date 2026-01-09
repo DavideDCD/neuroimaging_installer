@@ -15,6 +15,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 print_msg() { echo -e "${BLUE}[INFO]${NC} $1"; }
@@ -52,6 +53,7 @@ create_default_config() {
 {
   "software": {},
   "python_packages": {},
+  "docker_images": {},
   "config": {
     "last_checked": "",
     "auto_update": false
@@ -83,18 +85,69 @@ get_latest_version() {
         "pypi_json")
             curl -s "$check_url" | grep -oP '"version": "\K[0-9.]+' | head -1
             ;;
+        "dockerhub_api")
+            # Ottiene l'ultimo tag da Docker Hub
+            curl -s "$check_url?page_size=100" | \
+                grep -oP '"name": "\K[0-9]+\.[0-9]+\.[0-9]+"' | \
+                sort -V | tail -1
+            ;;
         *)
             curl -s "$check_url" | grep -oP '[0-9]+\.[0-9]+(\.[0-9]+)*' | sort -V | tail -1
             ;;
     esac
 }
 
+# Controlla aggiornamenti Docker images
+check_docker_images_updates() {
+    print_msg "Controllo aggiornamenti immagini Docker..."
+    
+    # Verifica se Docker è installato
+    if ! command -v docker >/dev/null 2>&1; then
+        print_warning "Docker non installato, salto controllo immagini"
+        return 0
+    fi
+    
+    declare -A docker_images=(
+        ["fmriprep"]="nipreps/fmriprep:24.1.1"
+        ["mriqc"]="nipreps/mriqc:24.0.2"
+        ["smriprep"]="nipreps/smriprep:0.15.0"
+    )
+    
+    for img_name in "${!docker_images[@]}"; do
+        local full_image="${docker_images[$img_name]}"
+        local image_repo=$(echo "$full_image" | cut -d: -f1)
+        local current_tag=$(echo "$full_image" | cut -d: -f2)
+        
+        print_msg "Verifica $img_name ($image_repo)..."
+        
+        # Ottieni ultima versione da Docker Hub
+        local latest=$(get_latest_version "$img_name" \
+            "https://hub.docker.com/v2/repositories/$image_repo/tags" \
+            "dockerhub_api")
+        
+        if [ -n "$latest" ] && [ "$latest" != "$current_tag" ]; then
+            print_warning "AGGIORNAMENTO DOCKER: $img_name $current_tag → $latest"
+            echo "docker:$img_name:$current_tag:$latest" >> updates_available.txt
+            
+            # Controlla se l'immagine è già scaricata localmente
+            if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "${image_repo}:${current_tag}"; then
+                local img_size=$(docker images --format "{{.Size}}" "${image_repo}:${current_tag}")
+                print_msg "Immagine attuale installata (dimensione: $img_size)"
+            fi
+        elif [ -n "$latest" ]; then
+            print_success "$img_name è aggiornato: $current_tag"
+        else
+            print_warning "Impossibile verificare $img_name"
+        fi
+    done
+}
+
 # Controlla aggiornamenti per software
 check_software_updates() {
     print_msg "Controllo aggiornamenti software..."
     
-    # Lista software da controllare
-    local software_list=("fsl" "freesurfer" "ants" "afni" "mrtrix" "c3d")
+    # Lista software da controllare (incluso fmriprep)
+    local software_list=("fsl" "freesurfer" "ants" "afni" "mrtrix" "c3d" "fmriprep")
     
     for software in "${software_list[@]}"; do
         print_msg "Verifica $software..."
@@ -136,6 +189,13 @@ check_software_updates() {
                     sort -V | tail -1)
                 current="1.4.0"
                 ;;
+            fmriprep)
+                # fMRIPrep usa GitHub releases
+                latest=$(get_latest_version "$software" \
+                    "https://api.github.com/repos/nipreps/fmriprep/releases/latest" \
+                    "github_api")
+                current="24.1.1"
+                ;;
         esac
         
         if [ -n "$latest" ] && [ "$latest" != "$current" ]; then
@@ -153,7 +213,7 @@ check_software_updates() {
 check_python_updates() {
     print_msg "Controllo aggiornamenti pacchetti Python..."
     
-    # Lista pacchetti da controllare
+    # Lista pacchetti da controllare (incluso fmriprep-docker)
     declare -A py_packages=(
         ["HD_BET"]="1.0"
         ["LST_AI"]="1.1.0"
@@ -161,6 +221,10 @@ check_python_updates() {
         ["torch"]="2.9.1"
         ["torchvision"]="0.24.1"
         ["pydeface"]="2.0.2"
+        ["fmriprep-docker"]="24.1.1"
+        ["nipype"]="1.8.6"
+        ["pybids"]="0.16.4"
+        ["templateflow"]="24.2.0"
     )
     
     for pkg in "${!py_packages[@]}"; do
@@ -181,6 +245,35 @@ check_python_updates() {
     done
 }
 
+# Aggiorna immagine Docker
+update_docker_image() {
+    local image_name=$1
+    local new_tag=$2
+    
+    print_msg "Aggiornamento immagine Docker $image_name a versione $new_tag..."
+    
+    # Pull nuova immagine
+    if docker pull "${image_name}:${new_tag}"; then
+        print_success "Immagine ${image_name}:${new_tag} scaricata con successo"
+        
+        # Opzionalmente rimuovi vecchia immagine
+        read -p "Rimuovere vecchia immagine? (s/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Ss]$ ]]; then
+            local old_images=$(docker images "${image_name}" --format "{{.Tag}}" | grep -v "$new_tag")
+            if [ -n "$old_images" ]; then
+                echo "$old_images" | while read -r old_tag; do
+                    print_msg "Rimozione ${image_name}:${old_tag}..."
+                    docker rmi "${image_name}:${old_tag}" || true
+                done
+            fi
+        fi
+    else
+        print_error "Errore durante il download di ${image_name}:${new_tag}"
+        return 1
+    fi
+}
+
 # Aggiorna file di configurazione
 update_config_file() {
     local updates_file="updates_available.txt"
@@ -195,7 +288,36 @@ update_config_file() {
     # Leggi aggiornamenti disponibili
     while IFS=':' read -r type name current latest; do
         case $type in
-            fsl|freesurfer|ants|afni|mrtrix|c3d)
+            docker)
+                print_msg "Aggiorno immagine Docker $name da $current a $latest"
+                
+                # Aggiorna nello script bash
+                if [ "$name" = "fmriprep" ]; then
+                    sed -i "s/FMRIPREP_VERSION=\"$current\"/FMRIPREP_VERSION=\"$latest\"/" "$SCRIPT_FILE"
+                    sed -i "s/nipreps\/fmriprep:${current}/nipreps\/fmriprep:${latest}/" "$SCRIPT_FILE"
+                fi
+                
+                # Aggiorna nel JSON
+                if command -v jq >/dev/null 2>&1 && [ -f "$CONFIG_FILE" ]; then
+                    jq ".docker_images.${name}.current_tag = \"$latest\"" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
+                    mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+                fi
+                
+                # Chiedi se aggiornare anche l'immagine Docker
+                if command -v docker >/dev/null 2>&1; then
+                    read -p "Scaricare nuova immagine Docker? (s/n): " -n 1 -r
+                    echo
+                    if [[ $REPLY =~ ^[Ss]$ ]]; then
+                        case $name in
+                            fmriprep) update_docker_image "nipreps/fmriprep" "$latest" ;;
+                            mriqc) update_docker_image "nipreps/mriqc" "$latest" ;;
+                            smriprep) update_docker_image "nipreps/smriprep" "$latest" ;;
+                        esac
+                    fi
+                fi
+                ;;
+                
+            fsl|freesurfer|ants|afni|mrtrix|c3d|fmriprep)
                 print_msg "Aggiorno $type da $current a $latest"
                 
                 # Aggiorna variabili nello script
@@ -209,8 +331,18 @@ update_config_file() {
                     sed -i "s|freesurfer-linux.*${current}.tar.gz|freesurfer-linux.*${latest}.tar.gz|" "$SCRIPT_FILE"
                 elif [ "$type" = "ants" ]; then
                     sed -i "s|ants-${current}-Linux|ants-${latest}-Linux|" "$SCRIPT_FILE"
+                elif [ "$type" = "fmriprep" ]; then
+                    # fMRIPrep è gestito via Docker, già aggiornato sopra
+                    :
+                fi
+                
+                # Aggiorna JSON
+                if command -v jq >/dev/null 2>&1 && [ -f "$CONFIG_FILE" ]; then
+                    jq ".software.${type}.current_version = \"$latest\"" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
+                    mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
                 fi
                 ;;
+                
             python)
                 print_msg "Aggiorno pacchetto Python $name da $current a $latest"
                 
@@ -219,6 +351,12 @@ update_config_file() {
                     sed -i "s/$name==$current/$name==$latest/" "$YAML_FILE"
                 elif grep -q "$name>=$current" "$YAML_FILE"; then
                     sed -i "s/$name>=$current/$name>=$latest/" "$YAML_FILE"
+                fi
+                
+                # Aggiorna JSON
+                if command -v jq >/dev/null 2>&1 && [ -f "$CONFIG_FILE" ]; then
+                    jq ".python_packages.\"${name}\".current_version = \"$latest\"" "$CONFIG_FILE" > "${CONFIG_FILE}.tmp"
+                    mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
                 fi
                 ;;
         esac
@@ -234,13 +372,13 @@ update_config_file() {
     
     # Mostra riepilogo
     echo ""
-    echo "════════════════════════════════════════════════════════"
+    echo "══════════════════════════════════════════════════════════"
     echo "  RIEPILOGO AGGIORNAMENTI"
-    echo "════════════════════════════════════════════════════════"
+    echo "══════════════════════════════════════════════════════════"
     cat "$updates_file" | while IFS=':' read -r type name current latest; do
-        printf "%-15s %-10s → %-10s\n" "$name" "$current" "$latest"
+        printf "%-15s %-15s %-10s → %-10s\n" "$type" "$name" "$current" "$latest"
     done
-    echo "════════════════════════════════════════════════════════"
+    echo "══════════════════════════════════════════════════════════"
     
     # Pulisci
     rm -f "$updates_file"
@@ -250,11 +388,23 @@ update_config_file() {
 check_system_dependencies() {
     print_msg "Verifica dipendenze di sistema..."
     
-    local deps=("curl" "wget" "git" "tar" "gzip" "cmake")
+    local deps=("curl" "wget" "git" "tar" "gzip" "cmake" "docker")
     
     for dep in "${deps[@]}"; do
         if command -v "$dep" >/dev/null 2>&1; then
             print_success "$dep: OK"
+            
+            # Mostra versione per alcuni tool importanti
+            case $dep in
+                docker)
+                    local docker_version=$(docker --version | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+                    print_msg "  Versione Docker: $docker_version"
+                    ;;
+                git)
+                    local git_version=$(git --version | grep -oP '[0-9]+\.[0-9]+\.[0-9]+')
+                    print_msg "  Versione Git: $git_version"
+                    ;;
+            esac
         else
             print_warning "$dep: NON TROVATO"
         fi
@@ -267,6 +417,15 @@ check_system_dependencies() {
     # Verifica RAM
     local total_ram=$(free -h | awk '/^Mem:/ {print $2}')
     print_msg "RAM totale: $total_ram"
+    
+    # Verifica spazio Docker (se disponibile)
+    if command -v docker >/dev/null 2>&1; then
+        print_msg "Verifica immagini Docker..."
+        local docker_images_count=$(docker images -q | wc -l)
+        local docker_size=$(docker system df --format "{{.Size}}" 2>/dev/null | head -1 || echo "N/A")
+        print_msg "  Immagini Docker installate: $docker_images_count"
+        print_msg "  Spazio usato da Docker: $docker_size"
+    fi
 }
 
 # Genera report
@@ -280,14 +439,36 @@ generate_report() {
 
 ## Software Neuroimaging
 
-| Software | Versione Corrente | Ultima Versione | Stato |
-|----------|-------------------|-----------------|--------|
+| Software | Versione Corrente | Ultima Versione | Stato | Note |
+|----------|-------------------|-----------------|--------|------|
 EOF
     
-    # Aggiungi righe per ogni software
-    for software in fsl freesurfer ants afni mrtrix c3d; do
-        # Qui andrebbe la logica per ottenere le versioni
-        echo "| $software | ... | ... | ... |" >> "$report_file"
+    # Verifica versioni e aggiungi al report
+    for software in fsl freesurfer ants afni mrtrix c3d fmriprep; do
+        print_msg "Controllo $software per report..."
+        
+        case $software in
+            fmriprep)
+                current="24.1.1"
+                latest=$(get_latest_version "$software" \
+                    "https://api.github.com/repos/nipreps/fmriprep/releases/latest" \
+                    "github_api")
+                note="Docker-based"
+                ;;
+            *)
+                current="..."
+                latest="..."
+                note=""
+                ;;
+        esac
+        
+        if [ "$current" = "$latest" ] || [ -z "$latest" ]; then
+            status="✓ Aggiornato"
+        else
+            status="⚠ Aggiornamento disponibile"
+        fi
+        
+        echo "| $software | $current | ${latest:-N/A} | $status | $note |" >> "$report_file"
     done
     
     cat >> "$report_file" << EOF
@@ -298,24 +479,94 @@ EOF
 |-----------|-------------------|-----------------|--------|
 EOF
     
+    for pkg in fmriprep-docker nipype pybids templateflow; do
+        echo "| $pkg | ... | ... | ... |" >> "$report_file"
+    done
+    
+    cat >> "$report_file" << EOF
+
+## Immagini Docker
+
+| Immagine | Tag Corrente | Ultimo Tag | Dimensione | Stato |
+|----------|--------------|------------|------------|--------|
+EOF
+    
+    if command -v docker >/dev/null 2>&1; then
+        for img in "nipreps/fmriprep" "nipreps/mriqc" "nipreps/smriprep"; do
+            if docker images --format "{{.Repository}}" | grep -q "$img"; then
+                local tag=$(docker images "$img" --format "{{.Tag}}" | head -1)
+                local size=$(docker images "$img" --format "{{.Size}}" | head -1)
+                echo "| $img | $tag | ... | $size | ✓ Installata |" >> "$report_file"
+            else
+                echo "| $img | - | ... | - | ✗ Non installata |" >> "$report_file"
+            fi
+        done
+    fi
+    
+    cat >> "$report_file" << EOF
+
+## Dipendenze Sistema
+
+$(check_system_dependencies 2>&1)
+
+---
+*Report generato automaticamente da update_versions.sh*
+EOF
+    
     print_success "Report generato: $report_file"
 }
 
 # Menu principale
 show_menu() {
     echo ""
-    echo "════════════════════════════════════════════════════════"
-    echo "  AGGREDITORE VERSIONI NEUROIMAGING"
-    echo "════════════════════════════════════════════════════════"
+    echo "══════════════════════════════════════════════════════════"
+    echo "  AGGIORNATORE VERSIONI NEUROIMAGING"
+    echo "══════════════════════════════════════════════════════════"
     echo "1) Controlla aggiornamenti software"
     echo "2) Controlla aggiornamenti pacchetti Python"
-    echo "3) Verifica dipendenze sistema"
-    echo "4) Aggiorna file di configurazione"
-    echo "5) Genera report completo"
-    echo "6) Esegui tutti i controlli"
-    echo "7) Esci"
-    echo "════════════════════════════════════════════════════════"
+    echo "3) Controlla aggiornamenti immagini Docker"
+    echo "4) Verifica dipendenze sistema"
+    echo "5) Aggiorna file di configurazione"
+    echo "6) Genera report completo"
+    echo "7) Esegui tutti i controlli"
+    echo "8) Pulisci vecchie immagini Docker"
+    echo "9) Esci"
+    echo "══════════════════════════════════════════════════════════"
     echo -n "Scelta: "
+}
+
+# Pulisci vecchie immagini Docker
+cleanup_docker_images() {
+    if ! command -v docker >/dev/null 2>&1; then
+        print_error "Docker non installato"
+        return 1
+    fi
+    
+    print_msg "Pulizia immagini Docker non utilizzate..."
+    
+    # Mostra immagini non taggate
+    local dangling=$(docker images -f "dangling=true" -q | wc -l)
+    print_msg "Immagini dangling trovate: $dangling"
+    
+    if [ "$dangling" -gt 0 ]; then
+        read -p "Rimuovere immagini dangling? (s/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Ss]$ ]]; then
+            docker image prune -f
+            print_success "Immagini dangling rimosse"
+        fi
+    fi
+    
+    # Mostra spazio liberabile
+    print_msg "Analisi spazio Docker..."
+    docker system df
+    
+    read -p "Eseguire pulizia completa? (s/n): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Ss]$ ]]; then
+        docker system prune -a --volumes -f
+        print_success "Pulizia Docker completata"
+    fi
 }
 
 # Main
@@ -341,22 +592,29 @@ main() {
                 check_python_updates
                 ;;
             3)
-                check_system_dependencies
+                check_docker_images_updates
                 ;;
             4)
-                update_config_file
+                check_system_dependencies
                 ;;
             5)
-                generate_report
+                update_config_file
                 ;;
             6)
-                check_software_updates
-                check_python_updates
-                check_system_dependencies
-                update_config_file
                 generate_report
                 ;;
             7)
+                check_software_updates
+                check_python_updates
+                check_docker_images_updates
+                check_system_dependencies
+                update_config_file
+                generate_report
+                ;;
+            8)
+                cleanup_docker_images
+                ;;
+            9)
                 print_msg "Arrivederci!"
                 exit 0
                 ;;
@@ -372,14 +630,19 @@ case "$1" in
     "--auto")
         check_software_updates
         check_python_updates
+        check_docker_images_updates
         update_config_file
         ;;
     "--check-only")
         check_software_updates
         check_python_updates
+        check_docker_images_updates
         ;;
     "--report")
         generate_report
+        ;;
+    "--docker-cleanup")
+        cleanup_docker_images
         ;;
     *)
         main
