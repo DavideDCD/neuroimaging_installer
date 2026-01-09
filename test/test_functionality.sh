@@ -3,7 +3,7 @@
 
 set -e
 
-echo "🧠 Test Funzionalità Neuroimaging"
+echo "Test Funzionalità Neuroimaging"
 echo "================================="
 
 # Directory test temporanea
@@ -13,7 +13,7 @@ cd "$TEST_DIR"
 
 # Crea dati test sintetici
 create_test_data() {
-    echo "📁 Creazione dati test..."
+    echo "Creazione dati test..."
     
     # Crea file NIfTI dummy per FSL
     python3 -c "
@@ -38,15 +38,15 @@ print('Maschera creata')
 
 # Test 1: FSL - Skull Stripping
 test_fsl() {
-    echo -e "\n1. 🧪 Test FSL (BET)"
+    echo -e "\n1. Test FSL (BET)"
     if command -v bet >/dev/null 2>&1; then
         # Usa il file fMRI come input (primo volume)
         fslroi test_fmri.nii.gz test_structural.nii.gz 0 1
         bet test_structural.nii.gz test_bet -m -f 0.3
         if [ -f "test_bet_mask.nii.gz" ]; then
-            echo "✅ BET completato con successo"
+            echo "BET completato con successo"
         else
-            echo "❌ BET fallito"
+            echo "BET fallito"
         fi
     else
         echo "⚠ FSL non disponibile"
@@ -55,7 +55,7 @@ test_fsl() {
 
 # Test 2: ANTs - Registration
 test_ants() {
-    echo -e "\n2. 🔄 Test ANTs (Registration)"
+    echo -e "\n2. Test ANTs (Registration)"
     if command -v antsRegistration >/dev/null 2>&1; then
         # Crea immagine di riferimento sintetica
         python3 -c "
@@ -86,18 +86,18 @@ nib.save(img, 'reference.nii.gz')
             --smoothing-sigmas 3x2x1x0vox 2>&1 | tail -20
         
         if [ -f "output_Warped.nii.gz" ]; then
-            echo "✅ ANTs registration completata"
+            echo "ANTs registration completata"
         else
-            echo "⚠ ANTs registration test base"
+            echo "ANTs registration test base"
         fi
     else
-        echo "⚠ ANTs non disponibile"
+        echo "ANTs non disponibile"
     fi
 }
 
 # Test 3: Python - Processing
 test_python() {
-    echo -e "\n3. 🐍 Test Python Neuroimaging"
+    echo -e "\n3. Test Python Neuroimaging"
     
     python3 -c "
 import nibabel as nib
@@ -105,7 +105,7 @@ import numpy as np
 from nilearn import image, plotting
 import matplotlib.pyplot as plt
 
-print('📦 Test librerie Python...')
+print('Test librerie Python...')
 
 # Carica dati
 img = nib.load('test_fmri.nii.gz')
@@ -120,20 +120,20 @@ print(f'  Smoothing completato')
 data = img.get_fdata()
 print(f'  Mean: {np.mean(data):.2f}, Std: {np.std(data):.2f}')
 
-print('✅ Tutti i test Python passati')
+print('Tutti i test Python passati')
 "
 }
 
 # Test 4: GPU - Deep Learning
 test_gpu() {
-    echo -e "\n4. 🚀 Test GPU Deep Learning"
+    echo -e "\n4. Test GPU Deep Learning"
     
     python3 -c "
 import torch
 import torch.nn as nn
 import numpy as np
 
-print('🧠 Test PyTorch e GPU...')
+print('Test PyTorch e GPU...')
 
 # Test base PyTorch
 x = torch.randn(10, 3, 64, 64)
@@ -153,13 +153,13 @@ if torch.cuda.is_available():
 else:
     print('  ⚠ GPU non disponibile per PyTorch')
 
-print('✅ Test PyTorch completato')
+print('Test PyTorch completato')
 "
 }
 
 # Test 5: MRtrix3 - Diffusion
 test_mrtrix() {
-    echo -e "\n5. 🌊 Test MRtrix3 (Diffusion)"
+    echo -e "\n5. Test MRtrix3 (Diffusion)"
     
     if command -v mrcalc >/dev/null 2>&1; then
         # Crea dati DWI dummy
@@ -184,18 +184,18 @@ print('Dati DWI sintetici creati')
         mrcalc dwi.nii.gz -mean -axis 3 mean_dwi.nii.gz 2>/dev/null || true
         
         if [ -f "mean_dwi.nii.gz" ]; then
-            echo "✅ MRtrix3 funzionante"
+            echo "MRtrix3 funzionante"
         else
-            echo "⚠ MRtrix3 test base"
+            echo "MRtrix3 test base"
         fi
     else
-        echo "⚠ MRtrix3 non disponibile"
+        echo "MRtrix3 non disponibile"
     fi
 }
 
 # Esegui tutti i test
 main() {
-    echo "📍 Directory test: $TEST_DIR"
+    echo "Directory test: $TEST_DIR"
     
     create_test_data
     test_fsl
@@ -205,7 +205,7 @@ main() {
     test_mrtrix
     
     # Riepilogo
-    echo -e "\n📊 RIEPILOGO TEST"
+    echo -e "\nRIEPILOGO TEST"
     echo "================="
     echo "Directory test: $TEST_DIR"
     echo "Mantieni per debug:"
@@ -217,11 +217,11 @@ main() {
     echo
     if [[ $REPLY =~ ^[Ss]$ ]]; then
         rm -rf "$TEST_DIR"
-        echo "🗑️ Directory test eliminata"
+        echo "Directory test eliminata"
     fi
 }
 
 # Gestione errore
-trap 'echo "❌ Test interrotto"; rm -rf "$TEST_DIR"; exit 1' ERR
+trap 'echo "Test interrotto"; rm -rf "$TEST_DIR"; exit 1' ERR
 
 main
