@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================
-# NEUROIMAGING ENVIRONMENT INSTALLER - VERSIONE COMPLETA
+# NEUROIMAGING ENVIRONMENT INSTALLER - VERSIONE COMPLETA CON FMRIPREP
 # ============================================================================
 
 set -e  # Exit on error
@@ -38,6 +38,7 @@ SPM_VERSION="12"
 MINICONDA_VERSION="latest"
 C3D_VERSION="1.4.0"
 CONN_VERSION="22.a"
+FMRIPREP_VERSION="24.1.1"
 
 # URL download
 declare -A DOWNLOAD_URLS=(
@@ -66,6 +67,7 @@ declare -A INSTALL_SOFTWARE=(
     ["c3d"]=false
     ["conn"]=false
     ["micromamba"]=false
+    ["fmriprep"]=false
 )
 
 # ============================================================================
@@ -73,9 +75,9 @@ declare -A INSTALL_SOFTWARE=(
 # ============================================================================
 
 print_header() {
-    echo -e "\n${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "\n${CYAN}╔═══════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${NC} ${BOLD}$1${NC}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}\n"
+    echo -e "${CYAN}╚═══════════════════════════════════════════════════════════╝${NC}\n"
 }
 
 print_message() { echo -e "${BLUE}[INFO]${NC} $1"; }
@@ -487,6 +489,348 @@ install_conn() {
 }
 
 # ============================================================================
+# INSTALLAZIONE DOCKER
+# ============================================================================
+
+install_docker() {
+    print_header "INSTALLAZIONE DOCKER"
+    
+    if command_exists apt-get; then
+        # Ubuntu/Debian
+        print_message "Installazione Docker su Ubuntu/Debian..."
+        
+        # Rimuovi versioni vecchie
+        sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+        
+        # Installa dipendenze
+        sudo apt-get update
+        sudo apt-get install -y \
+            ca-certificates \
+            curl \
+            gnupg \
+            lsb-release
+        
+        # Aggiungi repository Docker
+        sudo mkdir -p /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+            sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        
+        echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+            $(lsb_release -cs) stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        
+        # Installa Docker
+        sudo apt-get update
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        
+    elif command_exists yum; then
+        # CentOS/RHEL
+        print_message "Installazione Docker su CentOS/RHEL..."
+        sudo yum install -y yum-utils
+        sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+        sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        
+    elif command_exists dnf; then
+        # Fedora
+        print_message "Installazione Docker su Fedora..."
+        sudo dnf -y install dnf-plugins-core
+        sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+        sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    fi
+    
+    # Avvia e abilita Docker
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    
+    # Verifica installazione
+    if docker --version >/dev/null 2>&1; then
+        print_success "Docker installato correttamente"
+        docker --version
+    else
+        print_error "Installazione Docker fallita"
+        return 1
+    fi
+}
+
+# ============================================================================
+# INSTALLAZIONE FMRIPREP-DOCKER
+# ============================================================================
+
+install_fmriprep_docker() {
+    print_header "CONFIGURAZIONE FMRIPREP-DOCKER"
+    
+    # Verifica Docker
+    if ! command_exists docker; then
+        print_error "Docker non trovato. Installazione Docker..."
+        install_docker
+    fi
+    
+    # Verifica che Docker sia in esecuzione
+    if ! docker info >/dev/null 2>&1; then
+        print_warning "Docker non è in esecuzione. Avvio Docker..."
+        sudo systemctl start docker
+        sleep 3
+        if ! docker info >/dev/null 2>&1; then
+            print_error "Docker non può essere avviato. Avvialo manualmente con: sudo systemctl start docker"
+            return 1
+        fi
+    fi
+    
+    # Aggiungi utente al gruppo docker se necessario
+    if ! groups | grep -q docker; then
+        print_warning "Aggiunta utente al gruppo docker..."
+        sudo usermod -aG docker "$USER"
+        print_warning "IMPORTANTE: Riavvia la sessione per applicare le modifiche al gruppo docker"
+        print_warning "Oppure esegui: newgrp docker"
+    fi
+    
+    # Installa fmriprep-docker tramite pip nell'ambiente conda
+    print_message "Installazione fmriprep-docker wrapper..."
+    if [ -f "${CONDA_DIR}/bin/micromamba" ]; then
+        "${CONDA_DIR}/bin/micromamba" run -n neuroimaging pip install fmriprep-docker
+    elif command_exists conda; then
+        conda run -n neuroimaging pip install fmriprep-docker
+    else
+        pip install --user fmriprep-docker
+    fi
+    
+    # Pre-download dell'immagine Docker di fMRIPrep (opzionale ma consigliato)
+    local fmriprep_version="${FMRIPREP_VERSION}"
+    
+    if [ "$SILENT_MODE" = false ]; then
+        read -p "Scaricare l'immagine Docker di fMRIPrep ${fmriprep_version}? (s/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Ss]$ ]]; then
+            print_message "Download immagine fMRIPrep ${fmriprep_version}... (potrebbe richiedere tempo)"
+            docker pull nipreps/fmriprep:${fmriprep_version}
+            print_success "Immagine fMRIPrep scaricata"
+        fi
+    fi
+    
+    # Crea directory per TemplateFlow
+    local templateflow_dir="${INSTALL_DIR}/templateflow"
+    mkdir -p "$templateflow_dir"
+    
+    # Configura variabili d'ambiente
+    backup_config ~/.bashrc
+    echo "" >> ~/.bashrc
+    echo "# fMRIPrep Configuration" >> ~/.bashrc
+    echo "export TEMPLATEFLOW_HOME=\"${templateflow_dir}\"" >> ~/.bashrc
+    echo "export FMRIPREP_VERSION=\"${fmriprep_version}\"" >> ~/.bashrc
+    
+    # Crea script helper per fMRIPrep
+    create_fmriprep_helper_script
+    
+    print_success "fMRIPrep-Docker configurato"
+    print_message "Versione: ${fmriprep_version}"
+    print_message "TemplateFlow: ${templateflow_dir}"
+    print_message "Script helper: ${INSTALL_DIR}/bin/run_fmriprep.sh"
+}
+
+create_fmriprep_helper_script() {
+    local helper_script="${INSTALL_DIR}/bin/run_fmriprep.sh"
+    
+    mkdir -p "${INSTALL_DIR}/bin"
+    
+    cat > "$helper_script" << 'FMRIPREP_SCRIPT'
+#!/bin/bash
+
+# ============================================================================
+# FMRIPREP DOCKER HELPER SCRIPT
+# ============================================================================
+
+set -e
+
+# Colori
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+print_usage() {
+    cat << EOF
+Uso: $(basename "$0") [opzioni]
+
+Script helper per eseguire fMRIPrep con Docker
+
+Opzioni:
+    -b, --bids-dir DIR          Directory BIDS input (richiesto)
+    -o, --output-dir DIR        Directory output (richiesto)
+    -p, --participant-label ID  Partecipante da processare (opzionale)
+    -w, --work-dir DIR          Directory di lavoro (default: ./work)
+    -f, --fs-license FILE       File licenza FreeSurfer
+    -v, --version VERSION       Versione fMRIPrep (default: da \$FMRIPREP_VERSION)
+    --skip-bids-validation      Salta validazione BIDS
+    --fs-no-reconall            Salta ricostruzione FreeSurfer
+    --use-aroma                 Usa ICA-AROMA per denoising
+    --mem MB                    Memoria massima (default: 16000)
+    --n-cpus N                  Numero CPU (default: auto)
+    -h, --help                  Mostra questo messaggio
+
+Esempio:
+    $(basename "$0") -b /data/bids -o /data/derivatives -p sub-01
+
+EOF
+}
+
+# Valori di default
+BIDS_DIR=""
+OUTPUT_DIR=""
+PARTICIPANT=""
+WORK_DIR="./work"
+FS_LICENSE="${HOME}/neuroimaging/config/license.txt"
+FMRIPREP_VERSION="${FMRIPREP_VERSION:-24.1.1}"
+SKIP_BIDS_VALIDATION=""
+FS_NO_RECONALL=""
+USE_AROMA=""
+MEM_MB=16000
+N_CPUS=$(nproc)
+
+# Parsing argomenti
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -b|--bids-dir)
+            BIDS_DIR="$2"
+            shift 2
+            ;;
+        -o|--output-dir)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        -p|--participant-label)
+            PARTICIPANT="$2"
+            shift 2
+            ;;
+        -w|--work-dir)
+            WORK_DIR="$2"
+            shift 2
+            ;;
+        -f|--fs-license)
+            FS_LICENSE="$2"
+            shift 2
+            ;;
+        -v|--version)
+            FMRIPREP_VERSION="$2"
+            shift 2
+            ;;
+        --skip-bids-validation)
+            SKIP_BIDS_VALIDATION="--skip-bids-validation"
+            shift
+            ;;
+        --fs-no-reconall)
+            FS_NO_RECONALL="--fs-no-reconall"
+            shift
+            ;;
+        --use-aroma)
+            USE_AROMA="--use-aroma"
+            shift
+            ;;
+        --mem)
+            MEM_MB="$2"
+            shift 2
+            ;;
+        --n-cpus)
+            N_CPUS="$2"
+            shift 2
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Errore: opzione sconosciuta $1${NC}"
+            print_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Verifica parametri obbligatori
+if [ -z "$BIDS_DIR" ] || [ -z "$OUTPUT_DIR" ]; then
+    echo -e "${RED}Errore: --bids-dir e --output-dir sono obbligatori${NC}"
+    print_usage
+    exit 1
+fi
+
+# Verifica esistenza directory
+if [ ! -d "$BIDS_DIR" ]; then
+    echo -e "${RED}Errore: BIDS directory non trovata: $BIDS_DIR${NC}"
+    exit 1
+fi
+
+# Verifica licenza FreeSurfer
+if [ ! -f "$FS_LICENSE" ]; then
+    echo -e "${YELLOW}Warning: Licenza FreeSurfer non trovata in $FS_LICENSE${NC}"
+    echo "Ottienila da: https://surfer.nmr.mgh.harvard.edu/registration.html"
+    read -p "Inserisci il percorso alla licenza FreeSurfer: " FS_LICENSE
+    if [ ! -f "$FS_LICENSE" ]; then
+        echo -e "${RED}Errore: Licenza non valida${NC}"
+        exit 1
+    fi
+fi
+
+# Crea directory output e work se non esistono
+mkdir -p "$OUTPUT_DIR"
+mkdir -p "$WORK_DIR"
+
+# Converti path relativi in assoluti
+BIDS_DIR=$(realpath "$BIDS_DIR")
+OUTPUT_DIR=$(realpath "$OUTPUT_DIR")
+WORK_DIR=$(realpath "$WORK_DIR")
+FS_LICENSE=$(realpath "$FS_LICENSE")
+
+# Costruisci comando
+echo -e "${BLUE}=== Configurazione fMRIPrep ===${NC}"
+echo "BIDS Directory: $BIDS_DIR"
+echo "Output Directory: $OUTPUT_DIR"
+echo "Work Directory: $WORK_DIR"
+echo "Participant: ${PARTICIPANT:-all}"
+echo "Version: $FMRIPREP_VERSION"
+echo "Memory: ${MEM_MB} MB"
+echo "CPUs: $N_CPUS"
+echo ""
+
+# Comando base
+CMD="docker run --rm -it \
+    -v ${BIDS_DIR}:/data:ro \
+    -v ${OUTPUT_DIR}:/out \
+    -v ${WORK_DIR}:/work \
+    -v ${FS_LICENSE}:/opt/freesurfer/license.txt:ro \
+    -v ${TEMPLATEFLOW_HOME:-$HOME/.cache/templateflow}:/home/fmriprep/.cache/templateflow \
+    nipreps/fmriprep:${FMRIPREP_VERSION} \
+    /data /out participant \
+    --work-dir /work \
+    --mem-mb ${MEM_MB} \
+    --n-cpus ${N_CPUS} \
+    --output-spaces MNI152NLin2009cAsym:res-2 anat fsnative \
+    --write-graph --verbose \
+    ${SKIP_BIDS_VALIDATION} \
+    ${FS_NO_RECONALL} \
+    ${USE_AROMA}"
+
+# Aggiungi partecipante se specificato
+if [ -n "$PARTICIPANT" ]; then
+    CMD="$CMD --participant-label $PARTICIPANT"
+fi
+
+echo -e "${GREEN}Esecuzione fMRIPrep...${NC}"
+echo "$CMD"
+echo ""
+
+# Esegui
+eval $CMD
+
+echo -e "${GREEN}✓ fMRIPrep completato!${NC}"
+FMRIPREP_SCRIPT
+    
+    chmod +x "$helper_script"
+    
+    print_success "Script helper creato: $helper_script"
+}
+
+# ============================================================================
 # CREAZIONE AMBIENTE CONDA/MAMBA
 # ============================================================================
 
@@ -497,7 +841,7 @@ create_conda_environment() {
     
     if [ ! -f "$env_file" ]; then
         # Crea file YAML di default
-        cat > "$env_file" << EOF
+        cat > "$env_file" << 'EOF'
 name: neuroimaging
 channels:
   - conda-forge
@@ -543,12 +887,12 @@ dependencies:
   
   # Pip packages
   - pip:
-    - https://github.com/poldracklab/fmriprep/archive/refs/heads/main.zip
     - pydeface
     - heudiconv
     - fitlins
     - neurodocker
-    - neurotic
+    - fmriprep-docker
+    - templateflow
 EOF
         print_message "Creato file ambiente di default: $env_file"
     fi
@@ -716,12 +1060,52 @@ verify_installation() {
                         echo "✗ ANTs: FAILED" | tee -a "$verification_log"
                     fi
                     ;;
-                # ... aggiungi altri software
+                fmriprep)
+                    if command_exists docker && docker images | grep -q fmriprep; then
+                        echo "✓ fMRIPrep-Docker: OK" | tee -a "$verification_log"
+                    else
+                        echo "✗ fMRIPrep-Docker: FAILED" | tee -a "$verification_log"
+                    fi
+                    ;;
             esac
         fi
     done
     
     print_success "Verifica completata. Log: $verification_log"
+}
+
+show_help() {
+    cat << EOF
+Uso: $(basename "$0") [opzioni]
+
+Opzioni:
+    -a              Installa tutto
+    -f              Installa FSL
+    -r              Installa FreeSurfer
+    -n              Installa ANTs
+    -i              Installa AFNI
+    -m              Installa MRtrix3
+    -c              Installa Convert3D
+    -s              Installa SPM
+    -t              Installa CONN
+    -p              Installa fMRIPrep-Docker
+    -d              Crea ambiente conda
+    -g              Esporta a container Docker
+    -y              Modalità silenziosa
+    -u FILE         Usa file di configurazione
+    -h              Mostra questo help
+
+Esempi:
+    # Installa tutto
+    $(basename "$0") -a
+    
+    # Installa solo FSL e fMRIPrep
+    $(basename "$0") -f -p
+    
+    # Installa da file di configurazione
+    $(basename "$0") -u config.txt
+
+EOF
 }
 
 # ============================================================================
@@ -732,7 +1116,7 @@ main() {
     print_header "NEUROIMAGING ENVIRONMENT INSTALLER"
     
     # Parsing argomenti
-    while getopts "afnismcrtdyhu:g:" opt; do
+    while getopts "afnismcrtpdyhu:g:" opt; do
         case ${opt} in
             a) INSTALL_ALL=true ;;
             f) INSTALL_SOFTWARE["fsl"]=true ;;
@@ -743,6 +1127,7 @@ main() {
             c) INSTALL_SOFTWARE["c3d"]=true ;;
             r) INSTALL_SOFTWARE["freesurfer"]=true ;;
             t) INSTALL_SOFTWARE["conn"]=true ;;
+            p) INSTALL_SOFTWARE["fmriprep"]=true ;;
             d) CREATE_CONDA_ENV=true ;;
             y) SILENT_MODE=true ;;
             u) parse_config_file "$OPTARG" ;;
@@ -782,6 +1167,7 @@ main() {
                 c3d) install_c3d ;;
                 conn) install_conn ;;
                 micromamba) install_micromamba ;;
+                fmriprep) install_fmriprep_docker ;;
             esac
         fi
     done
@@ -817,10 +1203,16 @@ main() {
         else
             echo "  conda activate neuroimaging"
         fi
+        echo ""
+    fi
+    
+    if [ "${INSTALL_SOFTWARE[fmriprep]}" = true ]; then
+        echo "Per eseguire fMRIPrep:"
+        echo "  ${INSTALL_DIR}/bin/run_fmriprep.sh -b <bids_dir> -o <output_dir>"
+        echo ""
     fi
     
     if [ "$EXPORT_CONTAINER" = true ]; then
-        echo ""
         echo "Container Docker creato:"
         echo "  ${INSTALL_DIR}/run_neuroimaging_container.sh"
     fi
