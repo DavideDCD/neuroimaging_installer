@@ -68,6 +68,24 @@
       "dependencies": ["matlab"],
       "license": "CONN",
       "requires_matlab": true
+    },
+    "fmriprep": {
+      "current_version": "24.1.1",
+      "latest_version": "",
+      "check_url": "https://api.github.com/repos/nipreps/fmriprep/releases/latest",
+      "docker_image": "nipreps/fmriprep",
+      "docker_tag": "{version}",
+      "install_method": "docker",
+      "dependencies": ["docker"],
+      "license": "Apache 2.0",
+      "license_required": false,
+      "requires_freesurfer_license": true,
+      "notes": "Requires Docker and FreeSurfer license for full functionality",
+      "related_images": {
+        "mriqc": "nipreps/mriqc",
+        "smriprep": "nipreps/smriprep",
+        "dmriprep": "nipreps/dmriprep"
+      }
     }
   },
   "python_packages": {
@@ -91,18 +109,67 @@
       "pypi_name": "torch",
       "check_url": "https://pypi.org/pypi/torch/json",
       "cuda_version": "12.6"
+    },
+    "fmriprep-docker": {
+      "current_version": "24.1.1",
+      "pypi_name": "fmriprep-docker",
+      "check_url": "https://pypi.org/pypi/fmriprep-docker/json",
+      "notes": "Python wrapper for fMRIPrep Docker"
+    },
+    "nipype": {
+      "current_version": "1.8.6",
+      "pypi_name": "nipype",
+      "check_url": "https://pypi.org/pypi/nipype/json"
+    },
+    "pybids": {
+      "current_version": "0.16.4",
+      "pypi_name": "pybids",
+      "check_url": "https://pypi.org/pypi/pybids/json"
+    },
+    "templateflow": {
+      "current_version": "24.2.0",
+      "pypi_name": "templateflow",
+      "check_url": "https://pypi.org/pypi/templateflow/json"
+    }
+  },
+  "docker_images": {
+    "fmriprep": {
+      "image": "nipreps/fmriprep",
+      "current_tag": "24.1.1",
+      "latest_tag": "",
+      "check_url": "https://hub.docker.com/v2/repositories/nipreps/fmriprep/tags",
+      "size_gb": "~5.5",
+      "auto_update": false
+    },
+    "mriqc": {
+      "image": "nipreps/mriqc",
+      "current_tag": "24.0.2",
+      "latest_tag": "",
+      "check_url": "https://hub.docker.com/v2/repositories/nipreps/mriqc/tags",
+      "size_gb": "~3.2",
+      "auto_update": false
+    },
+    "smriprep": {
+      "image": "nipreps/smriprep",
+      "current_tag": "0.15.0",
+      "latest_tag": "",
+      "check_url": "https://hub.docker.com/v2/repositories/nipreps/smriprep/tags",
+      "size_gb": "~4.8",
+      "auto_update": false
     }
   },
   "system": {
     "min_cuda_version": "12.0",
     "min_python_version": "3.8",
+    "min_docker_version": "20.10",
     "required_packages": [
       "wget", "curl", "git", "build-essential",
       "cmake", "tcsh", "python3-dev", "libgl1-mesa-dev"
     ],
     "recommended_gpu_memory": "8GB",
     "min_ram": "16GB",
-    "min_disk_space": "50GB"
+    "min_disk_space": "50GB",
+    "docker_storage_driver": "overlay2"
   },
   "config": {
     "last_checked": "",
@@ -111,6 +178,8 @@
     "backup_before_update": true,
     "log_level": "info",
     "install_dir": "/opt/neuroimaging",
-    "conda_env_name": "neuroimaging"
+    "conda_env_name": "neuroimaging",
+    "docker_prune_on_update": true,
+    "keep_old_docker_images": 1
   }
 }
