@@ -1,0 +1,147 @@
+version: '3.8'
+
+services:
+  # Servizio principale per analisi neuroimaging
+  neuroimaging:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: neuroimaging:latest
+    container_name: neuroimaging-lab
+    restart: unless-stopped
+    
+    # Mount volumi per dati persistenti
+    volumes:
+      # Dati di input (sola lettura)
+      - ./data/input:/data/input:ro
+      
+      # Output delle analisi
+      - ./data/output:/data/output:rw
+      
+      # Database FreeSurfer subjects
+      - ./data/freesurfer_subjects:/freesurfer_subjects:rw
+      
+      # Cache per performance
+      - neuroimaging_cache:/cache:rw
+      
+      # Licenze (importante!)
+      - ./config/license.txt:/opt/freesurfer/license.txt:ro
+      
+      # Script personalizzati
+      - ./scripts:/scripts:ro
+    
+    # Porte esposte
+    ports:
+      - "8888:8888"    # Jupyter Lab
+      - "8050:8050"    # Plotly Dash (se usi)
+      - "6006:6006"    # TensorBoard
+    
+    # Variabili d'ambiente
+    environment:
+      - FSLDIR=/opt/fsl
+      - FREESURFER_HOME=/opt/freesurfer
+      - ANTSPATH=/opt/ants
+      - PATH=/opt/fsl/bin:/opt/freesurfer/bin:/opt/ants:/opt/mrtrix3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - FS_LICENSE=/opt/freesurfer/license.txt
+      - SUBJECTS_DIR=/freesurfer_subjects
+      - PYTHONPATH=/scripts:/opt/neuroimaging/python
+      
+      # Performance
+      - OMP_NUM_THREADS=4
+      - MKL_NUM_THREADS=4
+      - NUMBA_NUM_THREADS=4
+      
+      # GPU (se disponibile)
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    
+    # Limitazioni risorse
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 16G
+        reservations:
+          cpus: '4'
+          memory: 8G
+    
+    # Comando di default
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+
+  # Servizio Jupyter Lab separato (opzionale)
+  jupyter:
+    image: neuroimaging:latest
+    container_name: neuroimaging-jupyter
+    ports:
+      - "8889:8888"
+    volumes:
+      - ./notebooks:/notebooks:rw
+      - ./data:/data:ro
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=neuro123
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='neuro123'
+
+  # Servizio per preprocessing batch
+  preprocessor:
+    image: neuroimaging:latest
+    container_name: neuroimaging-preproc
+    volumes:
+      - ./data/raw:/data/raw:ro
+      - ./data/processed:/data/processed:rw
+      - ./pipelines:/pipelines:ro
+    depends_on:
+      - neuroimaging
+    command: python /pipelines/batch_preprocess.py
+
+  # Database per gestione metadati (opzionale)
+  postgres:
+    image: postgres:15
+    container_name: neuroimaging-db
+    environment:
+      - POSTGRES_DB=neurodb
+      - POSTGRES_USER=neuro
+      - POSTGRES_PASSWORD=neuropass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Interfaccia web per monitoraggio (Grafana + Prometheus)
+  monitoring:
+    image: grafana/grafana:latest
+    container_name: neuroimaging-monitor
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/dashboards:/etc/grafana/provisioning/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+# Volumi persistenti
+volumes:
+  neuroimaging_cache:
+    driver: local
+  postgres_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+# Network personalizzato
+networks:
+  neuro-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+# Configurazione per swarm mode (produzione)
+# x-deploy:
+#   mode: replicated
+#   replicas: 2
+#   placement:
+#     constraints:
+#       - node.role == worker

@@ -1,0 +1,116 @@
+{
+  "software": {
+    "fsl": {
+      "current_version": "6.0.7.1",
+      "latest_version": "",
+      "check_url": "https://fsl.fmrib.ox.ac.uk/fsldownloads/",
+      "download_url": "https://fsl.fmrib.ox.ac.uk/fsldownloads/fsl-{version}-centos7_64.tar.gz",
+      "install_dir": "/opt/fsl",
+      "dependencies": ["python", "tk", "libglu1-mesa"],
+      "license": "FSL",
+      "notes": "Requires registration for download"
+    },
+    "freesurfer": {
+      "current_version": "7.4.1",
+      "latest_version": "",
+      "check_url": "https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/",
+      "download_url": "https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/{version}/freesurfer-linux-ubuntu22_amd64-{version}.tar.gz",
+      "install_dir": "/opt/freesurfer",
+      "dependencies": ["qt5", "mesa", "tcsh"],
+      "license": "FreeSurfer",
+      "license_required": true,
+      "license_url": "https://surfer.nmr.mgh.harvard.edu/registration.html"
+    },
+    "ants": {
+      "current_version": "2.5.3",
+      "latest_version": "",
+      "check_url": "https://api.github.com/repos/ANTsX/ANTs/releases/latest",
+      "download_url": "https://github.com/ANTsX/ANTs/releases/download/v{version}/ants-{version}-Linux_x86_64.tar.gz",
+      "install_dir": "/opt/ants",
+      "dependencies": ["cmake", "gcc", "git"],
+      "license": "Apache 2.0"
+    },
+    "afni": {
+      "current_version": "latest",
+      "latest_version": "",
+      "check_url": "https://afni.nimh.nih.gov/pub/dist/tgz/",
+      "download_url": "",
+      "install_method": "script",
+      "install_script": "@update.afni.binaries",
+      "dependencies": ["tcsh", "libxp", "r-base"],
+      "license": "AFNI"
+    },
+    "mrtrix": {
+      "current_version": "3.0.3",
+      "latest_version": "",
+      "check_url": "https://api.github.com/repos/MRtrix3/mrtrix3/releases/latest",
+      "download_url": "",
+      "install_method": "git",
+      "git_repo": "https://github.com/MRtrix3/mrtrix3.git",
+      "dependencies": ["git", "g++", "qt5"],
+      "license": "MPL 2.0"
+    },
+    "c3d": {
+      "current_version": "1.4.0",
+      "latest_version": "",
+      "check_url": "https://sourceforge.net/projects/c3d/rss",
+      "download_url": "https://downloads.sourceforge.net/project/c3d/c3d/c3d-{version}/c3d-{version}-Linux-x86_64.tar.gz",
+      "install_dir": "/opt/c3d",
+      "dependencies": [],
+      "license": "Apache 2.0"
+    },
+    "conn": {
+      "current_version": "22.a",
+      "latest_version": "",
+      "check_url": "https://web.conn-toolbox.org/download",
+      "download_url": "https://www.linode.com/static/images/products/one-click-apps/conn_standalone.zip",
+      "install_dir": "/opt/conn",
+      "dependencies": ["matlab"],
+      "license": "CONN",
+      "requires_matlab": true
+    }
+  },
+  "python_packages": {
+    "hd-bet": {
+      "current_version": "1.0",
+      "pypi_name": "HD_BET",
+      "check_url": "https://pypi.org/pypi/HD_BET/json"
+    },
+    "lst-ai": {
+      "current_version": "1.1.0",
+      "pypi_name": "LST_AI",
+      "check_url": "https://pypi.org/pypi/LST_AI/json"
+    },
+    "nnunet": {
+      "current_version": "1.7.1",
+      "pypi_name": "nnunet",
+      "check_url": "https://pypi.org/pypi/nnunet/json"
+    },
+    "torch": {
+      "current_version": "2.9.1",
+      "pypi_name": "torch",
+      "check_url": "https://pypi.org/pypi/torch/json",
+      "cuda_version": "12.6"
+    }
+  },
+  "system": {
+    "min_cuda_version": "12.0",
+    "min_python_version": "3.8",
+    "required_packages": [
+      "wget", "curl", "git", "build-essential",
+      "cmake", "tcsh", "python3-dev", "libgl1-mesa-dev"
+    ],
+    "recommended_gpu_memory": "8GB",
+    "min_ram": "16GB",
+    "min_disk_space": "50GB"
+  },
+  "config": {
+    "last_checked": "",
+    "auto_update": false,
+    "notify_updates": true,
+    "backup_before_update": true,
+    "log_level": "info",
+    "install_dir": "/opt/neuroimaging",
+    "conda_env_name": "neuroimaging"
+  }
+}
