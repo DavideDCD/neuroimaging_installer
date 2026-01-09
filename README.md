@@ -88,6 +88,12 @@ sudo ./neuroimaging_installer.sh -a -y
 # Solo ambiente Python
 ./neuroimaging_installer.sh -d -y
 
+# Solo fMRIPrep-Docker
+./neuroimaging_installer.sh -p
+
+# Dopo l'installazione, usa lo script helper
+~/neuroimaging/bin/run_fmriprep.sh -b /data/bids -o /data/derivatives -p sub-01
+
 ### 3. Con Docker (Consigliato per riproducibilità)
 # Build dell'immagine
 docker build -t neuroimaging:latest .
