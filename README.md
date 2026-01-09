@@ -116,23 +116,6 @@ docker run -it --rm \
   -v $(pwd)/output:/output \
   neuroimaging:latest
 
-### Struttura del Progetto
-
-neuroimaging-toolkit/
-├── neuroimaging_installer.sh      # Script installazione principale
-├── update_versions.sh             # Sistema aggiornamenti automatici
-├── neuroimaging_env.yaml           # Ambiente conda/mamba completo
-├── neuroimaging_versions.json     # Database versioni software
-├── Dockerfile                     # Configurazione container
-├── docker-compose.yaml            # Orchestrazione multi-container
-├── config/                       # File configurazione
-│   ├── fsl.sh                   # Config FSL
-│   ├── freesurfer.sh            # Config FreeSurfer
-│   └── license.txt             # Licenze (da aggiungere manualmente)
-└── tests/                       # Test suite
-    ├── test_installation.sh    # Verifica installazione
-    └── test_functionality.sh   # Test funzionalità
-
 ## UTILIZZO AVANZATO
 
 ## Gestione Ambienti Conda/Mamba
