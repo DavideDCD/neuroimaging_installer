@@ -1746,6 +1746,7 @@ main() {
                 c3d) install_c3d ;;
                 dcm2niix) install_dcm2niix ;;
                 dcm2bids) install_dcm2bids ;;
+                spm) install_spm ;;
                 conn) install_conn ;;
                 micromamba) install_micromamba ;;
                 fmriprep) install_fmriprep_docker ;;
