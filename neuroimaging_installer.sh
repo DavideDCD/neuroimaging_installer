@@ -633,6 +633,7 @@ install_spm() {
 
     print_success "SPM installed in $spm_dir"
     rm -f "$temp_file"
+}
 
 install_conn() {
     print_header "CONN INSTALLATION"
