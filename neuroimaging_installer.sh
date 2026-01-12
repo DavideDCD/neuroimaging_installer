@@ -37,10 +37,10 @@ FREESURFER_VERSION="8.1.0"
 ANTs_VERSION="2.6.4"
 AFNI_VERSION="latest"
 MRTRIX_VERSION="3.0.3"
-SPM_VERSION="12"
 MINICONDA_VERSION="latest"
 C3D_VERSION="1.4.0"
-CONN_VERSION="22.a"
+SPM_VERSION="25.01.02"
+CONN_VERSION="22v2407"
 FMRIPREP_VERSION="24.1.1"
 MRIQC_VERSION="24.0.2"
 SMRIPREP_VERSION="0.15.0"
@@ -49,9 +49,10 @@ DCM2BIDS_VERSION="3.2.0"
 
 # URL download
 declare -A DOWNLOAD_URLS=(
-    ["fsl"]="https://fsl.fmrib.ox.ac.uk/fsldownloads/fsl-${FSL_VERSION}-centos7_64.tar.gz"
     ["c3d"]="https://downloads.sourceforge.net/project/c3d/c3d/c3d-${C3D_VERSION}/c3d-${C3D_VERSION}-Linux-x86_64.tar.gz"
     ["dcm2niix"]="https://github.com/rordenlab/dcm2niix/releases/download/v${DCM2NIIX_VERSION}/dcm2niix_lnx.zip"
+    ["spm"]="https://github.com/spm/spm/releases/download/${SPM_VERSION}/spm_${SPM_VERSION}.zip"
+    ["conn"]="https://www.nitrc.org/frs/download.php/16713/conn${CONN_VERSION}.zip"
 )
 
 # Platform-specific download URLs
@@ -611,11 +612,33 @@ install_c3d() {
     rm -f "$temp_file"
 }
 
+install_spm() {
+    print_header "SPM INSTALLATION"
+    
+    local spm_dir="${INSTALL_DIR}/spm"
+    local temp_file="/tmp/spm_${SPM_VERSION}.zip"
+    local spm_url="${DOWNLOAD_URLS[spm]}"
+
+    print_message "Download SPM..."
+    wget --progress=bar:force "$spm_url" -O "$temp_file"
+    mkdir -p "$spm_dir"
+    unzip "$temp_file" -d "$spm_dir"
+
+    # Require MATLAB
+    if command_exists matlab; then
+        print_message "Adding SPM to MATLAB path..."
+        echo "addpath('$spm_dir'); savepath;" > /tmp/spm_setup.m
+        matlab -nodisplay -r addpath('$spm_dir'); savepath; exit;
+    fi
+
+    print_success "SPM installed in $spm_dir"
+    rm -f "$temp_file"
+
 install_conn() {
     print_header "CONN INSTALLATION"
     
     local conn_dir="${INSTALL_DIR}/conn"
-    local conn_url="https://www.linode.com/static/images/products/one-click-apps/conn_standalone.zip"
+    local conn_url="${DOWNLOAD_URLS[conn]}"
     
     print_message "Download CONN..."
     wget --progress=bar:force "$conn_url" -O /tmp/conn.zip
@@ -627,7 +650,7 @@ install_conn() {
     if command_exists matlab; then
         print_message "Adding CONN to MATLAB path..."
         echo "addpath('$conn_dir'); savepath;" > /tmp/conn_setup.m
-        matlab -batch "run('/tmp/conn_setup.m')"
+        matlab -nodisplay -r addpath('$conn_dir'); savepath; exit;
     fi
 
     print_success "CONN installed in $conn_dir"
