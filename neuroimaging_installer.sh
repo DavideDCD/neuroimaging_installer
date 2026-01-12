@@ -623,7 +623,7 @@ install_conn() {
     mkdir -p "$conn_dir"
     unzip /tmp/conn.zip -d "$conn_dir"
     
-    # Richiede MATLAB
+    # Require MATLAB
     if command_exists matlab; then
         print_message "Adding CONN to MATLAB path..."
         echo "addpath('$conn_dir'); savepath;" > /tmp/conn_setup.m
@@ -688,8 +688,8 @@ install_docker() {
     # Start and enable Docker
     sudo systemctl start docker
     sudo systemctl enable docker
-    
-    # Verifica installazione
+
+    # Verify installation
     if docker --version >/dev/null 2>&1; then
         print_success "Docker installed correctly"
         docker --version
@@ -777,20 +777,20 @@ install_fmriprep_docker() {
 install_mriqc_docker() {
     print_header "MRIQC-DOCKER CONFIGURATION"
     
-    # Verifica Docker
+    # Verify Docker
     if ! command_exists docker; then
         print_error "Docker not found. Installing Docker..."
         install_docker
     fi
     
-    # Verifica che Docker sia in esecuzione
+    # Verify that Docker is running
     if ! docker info >/dev/null 2>&1; then
-        print_warning "Docker non è in esecuzione. Avvio Docker..."
+        print_warning "Docker is not running. Starting Docker..."
         sudo systemctl start docker
         sleep 3
     fi
     
-    # Pre-download dell'immagine Docker di MRIQC
+    # Pre-download MRIQC docker image
     local mriqc_version="${MRIQC_VERSION}"
     
     if [ "$SILENT_MODE" = false ]; then
@@ -802,38 +802,38 @@ install_mriqc_docker() {
             print_success "Immagine MRIQC scaricata"
         fi
     fi
-    
-    # Configura variabili d'ambiente
+
+    # Configure environment variables
     backup_config ~/.bashrc
     echo "" >> ~/.bashrc
     echo "# MRIQC Configuration" >> ~/.bashrc
     echo "export MRIQC_VERSION=\"${mriqc_version}\"" >> ~/.bashrc
-    
-    # Crea script helper per MRIQC
+
+    # Create helper script for MRIQC
     create_mriqc_helper_script
     
     print_success "MRIQC-Docker configured"
-    print_message "Versione: ${mriqc_version}"
-    print_message "Script helper: ${INSTALL_DIR}/bin/run_mriqc.sh"
+    print_message "Version: ${mriqc_version}"
+    print_message "Helper script: ${INSTALL_DIR}/bin/run_mriqc.sh"
 }
 
 install_smriprep_docker() {
     print_header "sMRIPrep-DOCKER CONFIGURATION"
     
-    # Verifica Docker
+    # Verify Docker
     if ! command_exists docker; then
         print_error "Docker not found. Installing Docker..."
         install_docker
     fi
     
-    # Verifica che Docker sia in esecuzione
+    # Verify that Docker is running
     if ! docker info >/dev/null 2>&1; then
-        print_warning "Docker non è in esecuzione. Avvio Docker..."
+        print_warning "Docker is not running. Starting Docker..."
         sudo systemctl start docker
         sleep 3
     fi
     
-    # Pre-download dell'immagine Docker di sMRIPrep
+    # Pre-download the Docker image of sMRIPrep
     local smriprep_version="${SMRIPREP_VERSION}"
     
     if [ "$SILENT_MODE" = false ]; then
@@ -846,22 +846,22 @@ install_smriprep_docker() {
         fi
     fi
     
-    # Crea directory per TemplateFlow se non esiste
+    # Create directory for TemplateFlow if it doesn't exist
     local templateflow_dir="${INSTALL_DIR}/templateflow"
     mkdir -p "$templateflow_dir"
     
-    # Configura variabili d'ambiente
+    # Configure environment variables
     backup_config ~/.bashrc
     echo "" >> ~/.bashrc
     echo "# sMRIPrep Configuration" >> ~/.bashrc
     echo "export SMRIPREP_VERSION=\"${smriprep_version}\"" >> ~/.bashrc
     
-    # Crea script helper per sMRIPrep
+    # Create helper script for sMRIPrep
     create_smriprep_helper_script
     
     print_success "sMRIPrep-Docker configured"
-    print_message "Versione: ${smriprep_version}"
-    print_message "Script helper: ${INSTALL_DIR}/bin/run_smriprep.sh"
+    print_message "Version: ${smriprep_version}"
+    print_message "Helper script: ${INSTALL_DIR}/bin/run_smriprep.sh"
 }
 
 create_fmriprep_helper_script() {
@@ -1489,7 +1489,7 @@ EOF
 }
 
 # ============================================================================
-# FUNZIONI DI GESTIONE
+# HELPER FUNCTIONS
 # ============================================================================
 
 parse_config_file() {
@@ -1498,7 +1498,7 @@ parse_config_file() {
     if [ -f "$config_file" ]; then
         print_message "Reading configuration file: $config_file"
         
-        # Formato semplice: software=versione
+        # Simple format: software=version
         while IFS='=' read -r key value; do
             case "$key" in
                 install_*)
