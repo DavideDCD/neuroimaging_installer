@@ -4,17 +4,17 @@
       "current_version": "6.0.7.1",
       "latest_version": "",
       "check_url": "https://fsl.fmrib.ox.ac.uk/fsldownloads/",
-      "download_url": "https://fsl.fmrib.ox.ac.uk/fsldownloads/fsl-{version}-centos7_64.tar.gz",
+      "download_url": "https://fsl.fmrib.ox.ac.uk/fsldownloads/fsl-6.0.7.1-centos7_64.tar.gz",
       "install_dir": "/opt/fsl",
       "dependencies": ["python", "tk", "libglu1-mesa"],
       "license": "FSL",
       "notes": "Requires registration for download"
     },
     "freesurfer": {
-      "current_version": "7.4.1",
+      "current_version": "8.1.0",
       "latest_version": "",
       "check_url": "https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/",
-      "download_url": "https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/{version}/freesurfer-linux-ubuntu22_amd64-{version}.tar.gz",
+      "download_url": "https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/8.1.0/freesurfer_ubuntu22-8.1.0_amd64.deb",
       "install_dir": "/opt/freesurfer",
       "dependencies": ["qt5", "mesa", "tcsh"],
       "license": "FreeSurfer",
@@ -22,10 +22,10 @@
       "license_url": "https://surfer.nmr.mgh.harvard.edu/registration.html"
     },
     "ants": {
-      "current_version": "2.5.3",
+      "current_version": "2.6.4",
       "latest_version": "",
       "check_url": "https://api.github.com/repos/ANTsX/ANTs/releases/latest",
-      "download_url": "https://github.com/ANTsX/ANTs/releases/download/v{version}/ants-{version}-Linux_x86_64.tar.gz",
+      "download_url": "https://github.com/ANTsX/ANTs/releases/download/v2.6.4/ants-2.6.4-ubuntu20.04-X64-gcc.zip",
       "install_dir": "/opt/ants",
       "dependencies": ["cmake", "gcc", "git"],
       "license": "Apache 2.0"
@@ -54,7 +54,7 @@
       "current_version": "1.4.0",
       "latest_version": "",
       "check_url": "https://sourceforge.net/projects/c3d/rss",
-      "download_url": "https://downloads.sourceforge.net/project/c3d/c3d/c3d-{version}/c3d-{version}-Linux-x86_64.tar.gz",
+      "download_url": "https://downloads.sourceforge.net/project/c3d/c3d/c3d-1.4.0/c3d-1.4.0-Linux-x86_64.tar.gz",
       "install_dir": "/opt/c3d",
       "dependencies": [],
       "license": "Apache 2.0"
@@ -74,7 +74,7 @@
       "latest_version": "",
       "check_url": "https://api.github.com/repos/nipreps/fmriprep/releases/latest",
       "docker_image": "nipreps/fmriprep",
-      "docker_tag": "{version}",
+      "docker_tag": "24.1.1",
       "install_method": "docker",
       "dependencies": ["docker"],
       "license": "Apache 2.0",

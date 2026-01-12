@@ -1,13 +1,16 @@
 #!/bin/bash
 
 # ============================================================================
-# NEUROIMAGING ENVIRONMENT INSTALLER - VERSIONE COMPLETA CON FMRIPREP
+# NEUROIMAGING ENVIRONMENT INSTALLER
 # ============================================================================
 
 set -e  # Exit on error
 trap 'cleanup_error' ERR
 
-# Colori per output
+# Directory where this installer script resides
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Output colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -18,7 +21,7 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # ============================================================================
-# CONFIGURAZIONE
+# CONFIGURATION
 # ============================================================================
 
 # Directory
@@ -28,10 +31,10 @@ LOG_DIR="${INSTALL_DIR}/logs"
 CONFIG_DIR="${INSTALL_DIR}/config"
 BACKUP_DIR="${INSTALL_DIR}/backup"
 
-# Versioni software
+# Software versions
 FSL_VERSION="6.0.7.1"
-FREESURFER_VERSION="7.4.1"
-ANTs_VERSION="2.5.3"
+FREESURFER_VERSION="8.1.0"
+ANTs_VERSION="2.6.4"
 AFNI_VERSION="latest"
 MRTRIX_VERSION="3.0.3"
 SPM_VERSION="12"
@@ -41,25 +44,37 @@ CONN_VERSION="22.a"
 FMRIPREP_VERSION="24.1.1"
 MRIQC_VERSION="24.0.2"
 SMRIPREP_VERSION="0.15.0"
+DCM2NIIX_VERSION="1.0.20250506"
+DCM2BIDS_VERSION="3.2.0"
 
 # URL download
 declare -A DOWNLOAD_URLS=(
     ["fsl"]="https://fsl.fmrib.ox.ac.uk/fsldownloads/fsl-${FSL_VERSION}-centos7_64.tar.gz"
-    ["freesurfer"]="https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/${FREESURFER_VERSION}/freesurfer-linux-ubuntu22_amd64-${FREESURFER_VERSION}.tar.gz"
-    ["ants"]="https://github.com/ANTsX/ANTs/releases/download/v${ANTs_VERSION}/ants-${ANTs_VERSION}-Linux_x86_64.tar.gz"
     ["c3d"]="https://downloads.sourceforge.net/project/c3d/c3d/c3d-${C3D_VERSION}/c3d-${C3D_VERSION}-Linux-x86_64.tar.gz"
+    ["dcm2niix"]="https://github.com/rordenlab/dcm2niix/releases/download/v${DCM2NIIX_VERSION}/dcm2niix_lnx.zip"
 )
+
+# Platform-specific download URLs
+if command -v apt-get >/dev/null 2>&1; then
+    DOWNLOAD_URLS["ants"]="https://github.com/ANTsX/ANTs/releases/download/v${ANTs_VERSION}/ants-${ANTs_VERSION}-ubuntu20.04-X64-gcc.zip"
+    DOWNLOAD_URLS["dcm2bids"]="https://github.com/UNFmontreal/Dcm2Bids/releases/download/${DCM2BIDS_VERSION}/dcm2bids_debian-based_${DCM2BIDS_VERSION}.tar.gz"
+    DOWNLOAD_URLS["freesurfer"]="https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/${FREESURFER_VERSION}/freesurfer_ubuntu22-${FREESURFER_VERSION}_amd64.deb"
+elif command -v yum >/dev/null 2>&1; then
+    DOWNLOAD_URLS["dcm2bids"]="https://github.com/UNFmontreal/Dcm2Bids/releases/download/${DCM2BIDS_VERSION}/dcm2bids_rhel-based_${DCM2BIDS_VERSION}.tar.gz"
+    DOWNLOAD_URLS["ants"]="https://github.com/ANTsX/ANTs/releases/download/v${ANTs_VERSION}/ants-${ANTs_VERSION}-centos7-X64-gcc.zip"
+    DOWNLOAD_URLS["freesurfer"]="https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/${FREESURFER_VERSION}/freesurfer_CentOS7-${FREESURFER_VERSION}-1.x86_64.rpm"
+fi
 
 # Flag
 SILENT_MODE=false
 INSTALL_ALL=false
-SKIP_DEPENDENCIES=false
+SKIP_DEPENDENCIES=${SKIP_DEPENDENCIES:-false}
 FORCE_INSTALL=false
 CREATE_CONDA_ENV=false
 EXPORT_CONTAINER=false
 
-# Software da installare
-declare -A INSTALL_SOFTWARE=(
+# Software to install
+declare -A INSTALL_SOFTWARE=(   
     ["fsl"]=false
     ["freesurfer"]=false
     ["ants"]=false
@@ -72,10 +87,12 @@ declare -A INSTALL_SOFTWARE=(
     ["fmriprep"]=false
     ["mriqc"]=false
     ["smriprep"]=false
+    ["dcm2niix"]=false
+    ["dcm2bids"]=false
 )
 
 # ============================================================================
-# FUNZIONI UTILITY
+# UTILITY FUNCTIONS
 # ============================================================================
 
 print_header() {
@@ -85,31 +102,31 @@ print_header() {
 }
 
 print_message() { echo -e "${BLUE}[INFO]${NC} $1"; }
-print_success() { echo -e "${GREEN}[✓]${NC} $1"; }
+print_success() { echo -e "${GREEN}[${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
-print_error() { echo -e "${RED}[✗]${NC} $1"; }
+print_error() { echo -e "${RED}[x]${NC} $1"; }
 print_debug() { [ "$DEBUG" = "true" ] && echo -e "${MAGENTA}[DEBUG]${NC} $1"; }
 
-# Funzione per prompt silenzioso
+# Silent ptompt instructions
 prompt_user() {
     if [ "$SILENT_MODE" = true ]; then
-        echo "$2"  # Ritorna valore di default
+        echo "$2"  # Returns default values
     else
         read -p "$1 " response
         echo "$response"
     fi
 }
 
-# Controllo comandi
+# Check if command exists
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
-# Creazione directory
+# Directory creation
 create_dirs() {
     mkdir -p "$INSTALL_DIR" "$LOG_DIR" "$CONFIG_DIR" "$BACKUP_DIR"
     mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/lib" "$INSTALL_DIR/share"
 }
 
-# Backup configurazioni
+# Backup configurations
 backup_config() {
     local config_file="$1"
     if [ -f "$config_file" ]; then
@@ -118,15 +135,20 @@ backup_config() {
 }
 
 # ============================================================================
-# CONTROLLO VERSIONI ONLINE
+# ONLINE VERSION CHECK
 # ============================================================================
 
 check_online_version() {
     local software=$1
     local current_version=$2
-    
-    print_message "Controllo versione online per ${BOLD}$software${NC}..."
-    
+
+    # When running in silent mode, skip interactive online version checks
+    if [ "$SILENT_MODE" = true ]; then
+        return 0
+    fi
+
+    print_message "Checking ${BOLD}$software${NC}..."
+
     case $software in
         fsl)
             latest=$(curl -s https://fsl.fmrib.ox.ac.uk/fsldownloads/ | \
@@ -149,35 +171,38 @@ check_online_version() {
                     grep -oP 'linux_openmp_64\.\K[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
             ;;
         *)
-            print_warning "Controllo versione non implementato per $software"
-            return 1
+            print_warning "Checking version not implemented for $software"
+            return 0
             ;;
     esac
     
     if [ -n "$latest" ] && [ "$latest" != "$current_version" ]; then
-        print_warning "Nuova versione disponibile: $current_version → $latest"
+        print_warning "New version available: $current_version → $latest"
         if [ "$SILENT_MODE" = false ]; then
-            read -p "Aggiornare? (s/n): " -n 1 -r
+            read -p "Update? (y/n): " -n 1 -r
             echo
-            if [[ $REPLY =~ ^[Ss]$ ]]; then
+            if [[ $REPLY =~ ^[SsYy]$ ]]; then
                 eval "${software}_version=\"$latest\""
                 DOWNLOAD_URLS["$software"]=$(update_download_url "$software" "$latest")
-                return 0
             fi
         fi
+        # Do not treat user choosing not to update as an error
+        return 0
     elif [ -n "$latest" ]; then
-        print_success "Versione aggiornata: $current_version"
+        print_message "No update available for $software (current: $current_version)"
+        return 0
     fi
-    
-    return 1
+
+    # Default to success unless a real error occurred
+    return 0
 }
 
 # ============================================================================
-# INSTALLAZIONE SOFTWARE
+# SOFTWARE INSTALLATION
 # ============================================================================
 
 install_system_dependencies() {
-    print_header "INSTALLAZIONE DIPENDENZE DI SISTEMA"
+    print_header "SYSTEM DEPENDENCIES INSTALLATION"
     
     if command_exists apt-get; then
         sudo apt-get update
@@ -192,7 +217,7 @@ install_system_dependencies() {
             libtool automake autoconf cmake g++ gcc \
             perl tcsh xfonts-base python-is-python3 \
             gnome-tweak-tool libjpeg62 xvfb xterm vim \
-            netpbm gnome-tweak-tool libxp6
+            netpbm gnome-tweak-tool
         
     elif command_exists yum; then
         sudo yum install -y \
@@ -217,11 +242,11 @@ install_system_dependencies() {
             libXp netpbm-progs
     fi
     
-    print_success "Dipendenze di sistema installate"
+    print_success "System dependencies installed"
 }
 
 install_micromamba() {
-    print_header "INSTALLAZIONE MICROMAMBA"
+    print_header "MICROMAMBA INSTALLATION"
     
     local mamba_url="https://micro.mamba.pm/api/micromamba/linux-64/latest"
     
@@ -231,21 +256,21 @@ install_micromamba() {
     print_message "Download micromamba..."
     curl -Ls "$mamba_url" | tar -xj bin/micromamba
     
-    # Inizializza shell
+    # Initialize shell
     ./bin/micromamba shell init -p "${CONDA_DIR}/envs" -s bash
     
-    # Configura ambiente
+    # Configure environment
     echo "# Micromamba Configuration" >> ~/.bashrc
     echo "export MAMBA_ROOT_PREFIX=\"${CONDA_DIR}/envs\"" >> ~/.bashrc
     echo "export MAMBA_EXE=\"${CONDA_DIR}/bin/micromamba\"" >> ~/.bashrc
     echo 'eval "$(${MAMBA_EXE} shell hook --shell bash)"' >> ~/.bashrc
     
-    # Crea ambiente neuroimaging
+    # Create neuroimaging environment
     if [ -f "${CONFIG_DIR}/neuroimaging_env.yml" ]; then
-        print_message "Creazione ambiente da YAML..."
+        print_message "Creating environment from YAML..."
         "${CONDA_DIR}/bin/micromamba" create -f "${CONFIG_DIR}/neuroimaging_env.yml" -y
     else
-        print_message "Creazione ambiente neuroimaging di base..."
+        print_message "Creating base neuroimaging environment..."
         "${CONDA_DIR}/bin/micromamba" create -n neuroimaging \
             python=3.10 \
             numpy scipy pandas matplotlib seaborn \
@@ -254,31 +279,31 @@ install_micromamba() {
             ipython ipykernel ipywidgets \
             pip -y
     fi
-    
-    print_success "Micromamba installato in $CONDA_DIR"
+
+    print_success "Micromamba installed in $CONDA_DIR"
 }
 
 install_fsl() {
-    print_header "INSTALLAZIONE FSL"
-    
+    print_header "FSL INSTALLATION"
+
     local fsl_dir="${INSTALL_DIR}/fsl"
-    local temp_file="/tmp/fsl_${FSL_VERSION}.tar.gz"
-    
-    # Check se già installato
+
+    # Check if already installed
     if [ -d "$fsl_dir" ] && [ "$FORCE_INSTALL" = false ]; then
-        print_warning "FSL già installato in $fsl_dir"
+        print_warning "FSL already installed in $fsl_dir"
         return 0
     fi
-    
-    check_online_version "fsl" "$FSL_VERSION"
-    
-    print_message "Download FSL ${FSL_VERSION}..."
-    wget --progress=bar:force "${DOWNLOAD_URLS[fsl]}" -O "$temp_file"
-    
-    print_message "Estrazione..."
-    mkdir -p "$fsl_dir"
-    tar -xzf "$temp_file" -C "$fsl_dir" --strip-components=1
-    
+
+    # Ensure bundled getfsl.sh exists
+    local getfsl_script="${SCRIPT_DIR}/config/getfsl.sh"
+    if [ ! -f "$getfsl_script" ]; then
+        print_error "getfsl.sh not found at $getfsl_script. Please ensure config/getfsl.sh is present."
+        return 1
+    fi
+
+    print_message "Installing FSL ${FSL_VERSION} using getfsl.sh into $fsl_dir..."
+    sh "$getfsl_script" "$fsl_dir"
+
     # Setup environment
     backup_config ~/.bashrc
     echo "# FSL Configuration" >> ~/.bashrc
@@ -286,39 +311,129 @@ install_fsl() {
     echo "export PATH=\"\${FSLDIR}/bin:\${PATH}\"" >> ~/.bashrc
     echo "source \${FSLDIR}/etc/fslconf/fsl.sh" >> ~/.bashrc
     echo "export FSLOUTPUTTYPE=NIFTI_GZ" >> ~/.bashrc
-    
-    # Verifica installazione
-    if [ -f "${fsl_dir}/bin/fsl" ]; then
-        print_success "FSL installato in $fsl_dir"
+
+    # Verify installation
+    if [ -f "${fsl_dir}/bin/fsl" ] || [ -f "${fsl_dir}/bin/dcm2niix" ]; then
+        print_success "FSL installed in $fsl_dir"
     else
-        print_error "Installazione FSL fallita"
+        print_error "FSL installation may have failed"
         return 1
     fi
-    
-    rm -f "$temp_file"
+}
+
+install_dcm2niix() {
+    print_header "dcm2niix INSTALLATION"
+
+    local temp_zip="/tmp/dcm2niix_${DCM2NIIX_VERSION}.zip"
+    local extract_dir="/tmp/dcm2niix_extract_${DCM2NIIX_VERSION}"
+
+    print_message "Downloading dcm2niix ${DCM2NIIX_VERSION}..."
+    wget --progress=bar:force "${DOWNLOAD_URLS[dcm2niix]}" -O "$temp_zip"
+
+    print_message "Extracting dcm2niix..."
+    rm -rf "$extract_dir" && mkdir -p "$extract_dir"
+    unzip -o "$temp_zip" -d "$extract_dir" || true
+
+    # Find executable
+    local exe_path
+    exe_path=$(find "$extract_dir" -type f -name 'dcm2niix' -perm /111 | head -n 1 || true)
+    if [ -z "$exe_path" ]; then
+        # Try any executable
+        exe_path=$(find "$extract_dir" -type f -perm /111 | head -n 1 || true)
+    fi
+
+    if [ -z "$exe_path" ]; then
+        print_error "dcm2niix executable not found in archive"
+        rm -rf "$extract_dir" "$temp_zip"
+        return 1
+    fi
+
+    print_message "Moving dcm2niix to /usr/bin (may require sudo)..."
+    if [ -w "/usr/bin" ]; then
+        mv "$exe_path" /usr/bin/dcm2niix
+        chmod +x /usr/bin/dcm2niix || true
+    else
+        if command_exists sudo; then
+            sudo mv "$exe_path" /usr/bin/dcm2niix
+            sudo chmod +x /usr/bin/dcm2niix || true
+        else
+            print_error "Cannot write to /usr/bin and sudo not available"
+            rm -rf "$extract_dir" "$temp_zip"
+            return 1
+        fi
+    fi
+
+    print_success "dcm2niix installed to /usr/bin/dcm2niix"
+
+    rm -rf "$extract_dir" "$temp_zip"
+}
+
+install_dcm2bids() {
+    print_header "dcm2bids INSTALLATION"
+
+    local temp_tgz="/tmp/dcm2bids_${DCM2BIDS_VERSION}.tar.gz"
+    local extract_dir="/tmp/dcm2bids_extract_${DCM2BIDS_VERSION}"
+
+    print_message "Downloading dcm2bids ${DCM2BIDS_VERSION}..."
+    wget --progress=bar:force "${DOWNLOAD_URLS[dcm2bids]}" -O "$temp_tgz"
+
+    rm -rf "$extract_dir" && mkdir -p "$extract_dir"
+    tar -xzf "$temp_tgz" -C "$extract_dir" || true
+
+    # Find executable
+    local exe_path
+    exe_path=$(find "$extract_dir" -type f -name 'dcm2bids*' -perm /111 | head -n 1 || true)
+    if [ -z "$exe_path" ]; then
+        exe_path=$(find "$extract_dir" -type f -perm /111 | head -n 1 || true)
+    fi
+
+    if [ -z "$exe_path" ]; then
+        print_error "dcm2bids executable not found in archive"
+        rm -rf "$extract_dir" "$temp_tgz"
+        return 1
+    fi
+
+    print_message "Moving dcm2bids to /usr/bin (may require sudo)..."
+    if [ -w "/usr/bin" ]; then
+        mv "$exe_path" /usr/bin/dcm2bids
+        chmod +x /usr/bin/dcm2bids || true
+    else
+        if command_exists sudo; then
+            sudo mv "$exe_path" /usr/bin/dcm2bids
+            sudo chmod +x /usr/bin/dcm2bids || true
+        else
+            print_error "Cannot write to /usr/bin and sudo not available"
+            rm -rf "$extract_dir" "$temp_tgz"
+            return 1
+        fi
+    fi
+
+    print_success "dcm2bids installed to /usr/bin/dcm2bids"
+
+    rm -rf "$extract_dir" "$temp_tgz"
 }
 
 install_freesurfer() {
-    print_header "INSTALLAZIONE FREESURFER"
+    print_header "FREESURFER INSTALLATION"
     
     local fs_dir="${INSTALL_DIR}/freesurfer"
     local license_file="${CONFIG_DIR}/license.txt"
     
     if [ -d "$fs_dir" ] && [ "$FORCE_INSTALL" = false ]; then
-        print_warning "FreeSurfer già installato in $fs_dir"
+        print_warning "FreeSurfer already installed in $fs_dir"
         return 0
     fi
     
     check_online_version "freesurfer" "$FREESURFER_VERSION"
     
-    # Richiedi licenza
+    # License handling
     if [ ! -f "$license_file" ] && [ "$SILENT_MODE" = false ]; then
-        print_warning "FreeSurfer richiede una licenza"
-        echo "Ottienila da: https://surfer.nmr.mgh.harvard.edu/registration.html"
-        read -p "Incolla il contenuto della licenza (Ctrl+D per terminare):" license_content
+        print_warning "FreeSurfer requires a license"
+        echo "Get it from: https://surfer.nmr.mgh.harvard.edu/registration.html"
+        read -p "Paste the license content (Ctrl+D to finish):" license_content
         echo "$license_content" > "$license_file"
     elif [ "$SILENT_MODE" = true ]; then
-        print_warning "Modalità silenziosa: assicurati di avere il file ${license_file}"
+        print_warning "Silent mode: ensure you have the file ${license_file}"
     fi
     
     # Download
@@ -326,11 +441,11 @@ install_freesurfer() {
     print_message "Download FreeSurfer ${FREESURFER_VERSION}..."
     wget --progress=bar:force "${DOWNLOAD_URLS[freesurfer]}" -O "$temp_file"
     
-    # Estrazione
+    # Extraction
     mkdir -p "$fs_dir"
     tar -xzf "$temp_file" -C "$fs_dir" --strip-components=1
     
-    # Configurazione
+    # Configuration
     backup_config ~/.bashrc
     echo "# FreeSurfer Configuration" >> ~/.bashrc
     echo "export FREESURFER_HOME=\"$fs_dir\"" >> ~/.bashrc
@@ -342,37 +457,64 @@ install_freesurfer() {
     mkdir -p "$SUBJECTS_DIR"
     echo "export SUBJECTS_DIR=\"$SUBJECTS_DIR\"" >> ~/.bashrc
     
-    print_success "FreeSurfer installato in $fs_dir"
+    print_success "FreeSurfer installed in $fs_dir"
     rm -f "$temp_file"
 }
 
 install_ants() {
-    print_header "INSTALLAZIONE ANTs"
+    print_header "ANTs INSTALLATION"
     
     local ants_dir="${INSTALL_DIR}/ants"
     
     check_online_version "ants" "$ANTs_VERSION"
     
     # Download
-    local temp_file="/tmp/ants_${ANTs_VERSION}.tar.gz"
+    local url="${DOWNLOAD_URLS[ants]}"
+    local temp_file
+    if echo "$url" | grep -qi "\.zip"; then
+        temp_file="/tmp/ants_${ANTs_VERSION}.zip"
+    else
+        temp_file="/tmp/ants_${ANTs_VERSION}.tar.gz"
+    fi
     print_message "Download ANTs ${ANTs_VERSION}..."
-    wget --progress=bar:force "${DOWNLOAD_URLS[ants]}" -O "$temp_file"
+    wget --progress=bar:force "$url" -O "$temp_file"
+
+    # Extraction (handle .zip and tar.gz)
+    if echo "$temp_file" | grep -qi "\.zip"; then
+        # Download directly into the target dir to avoid double-copying large archives
+        mkdir -p "$ants_dir"
+        local local_zip="${ants_dir}/ants_${ANTs_VERSION}.zip"
+        mv "$temp_file" "$local_zip" 2>/dev/null || true
+        # If wget wrote to temp_file path (outside ants_dir), move it into ants_dir
+        if [ ! -f "$local_zip" ] && [ -f "$temp_file" ]; then
+            mv "$temp_file" "$local_zip" || true
+        fi
+        unzip -o "$local_zip" -d "$ants_dir" || true
+        # If archive created a single top-level directory, normalize contents
+        # Normalize if the archive created a single top-level directory.
+        # Consider only directories (ignore the zip file itself or other files).
+        mapfile -t subdirs < <(find "$ants_dir" -mindepth 1 -maxdepth 1 -type d -print)
+        if [ "${#subdirs[@]}" -eq 1 ]; then
+            mv "${subdirs[0]}"/* "$ants_dir" 2>/dev/null || true
+            rmdir "${subdirs[0]}" 2>/dev/null || true
+        fi
+        rm -f "$local_zip"
+    else
+        mkdir -p "$ants_dir"
+        tar -xzf "$temp_file" -C "$ants_dir" --strip-components=1
+    fi
     
-    # Estrazione
-    mkdir -p "$ants_dir"
-    tar -xzf "$temp_file" -C "$ants_dir" --strip-components=1
-    
-    # Configurazione
+    # Configuration
     backup_config ~/.bashrc
     echo "# ANTs Configuration" >> ~/.bashrc
-    echo "export ANTSPATH=\"$ants_dir\"" >> ~/.bashrc
+    echo "export ANTSPATH=\"$ants_dir/bin\"" >> ~/.bashrc
     echo "export PATH=\"\${ANTSPATH}:\${PATH}\"" >> ~/.bashrc
     
-    # Verifica
-    if [ -f "${ants_dir}/antsRegistration" ]; then
-        print_success "ANTs installato in $ants_dir"
+    # Verify installation (check common locations for antsRegistration)
+    if [ -x "${ants_dir}/antsRegistration" ] || [ -x "${ants_dir}/bin/antsRegistration" ]; then
+        print_success "ANTs installed in $ants_dir"
     else
-        print_error "Installazione ANTs fallita"
+        print_error "ANTs installation failed"
         return 1
     fi
     
@@ -380,77 +522,77 @@ install_ants() {
 }
 
 install_afni() {
-    print_header "INSTALLAZIONE AFNI"
-    
+    print_header "AFNI INSTALLATION"
+
     check_online_version "afni" "$AFNI_VERSION"
     
-    # Installa dipendenze specifiche AFNI
-    print_message "Installazione dipendenze AFNI..."
+    # AFNI specific dependencies installation
+    print_message "Installing AFNI dependencies..."
     if command_exists apt-get; then
         sudo apt-get install -y \
-            libxp6 libxpm4 libxmu6 libxt6 \
+            libxpm4 libxmu6 libxt6 \
             libmotif-common libmotif-dev \
             libglu1-mesa-dev libglw1-mesa-dev \
             libxm4 libxpm-dev libxt-dev \
             libxi6 libxinerama1
     fi
-    
-    # Installa R (opzionale ma utile)
+
+    # Install R (optional but useful)
     if ! command_exists R; then
-        print_message "Installazione R per AFNI..."
+        print_message "Installing R for AFNI..."
         if command_exists apt-get; then
             sudo apt-get install -y r-base r-base-dev
         fi
     fi
-    
-    # Installa AFNI
-    print_message "Installazione AFNI..."
+
+    # Install AFNI
+    print_message "Installing AFNI..."
     cd /tmp
     curl -O https://afni.nimh.nih.gov/pub/dist/bin/linux_openmp_64/@update.afni.binaries
     tcsh @update.afni.binaries -package linux_openmp_64 -do_extras -bindir "${INSTALL_DIR}/abin"
-    
-    # Configurazione
+
+    # Configuration
     backup_config ~/.bashrc
     echo "# AFNI Configuration" >> ~/.bashrc
     echo "export PATH=\"${INSTALL_DIR}/abin:\$PATH\"" >> ~/.bashrc
     echo "export AFNI_PLUGINPATH=\"${INSTALL_DIR}/abin\"" >> ~/.bashrc
-    
-    print_success "AFNI installato"
+
+    print_success "AFNI installed"
 }
 
 install_mrtrix() {
-    print_header "INSTALLAZIONE MRtrix3"
-    
+    print_header "MRtrix3 INSTALLATION"
+
     local mrtrix_dir="${INSTALL_DIR}/mrtrix3"
     
     check_online_version "mrtrix" "$MRTRIX_VERSION"
     
-    # Clone o update
+    # Clone or update
     if [ -d "$mrtrix_dir" ]; then
-        print_message "Aggiornamento MRtrix3..."
+        print_message "Updating MRtrix3..."
         cd "$mrtrix_dir"
         git pull
     else
-        print_message "Clone MRtrix3..."
+        print_message "Cloning MRtrix3..."
         git clone https://github.com/MRtrix3/mrtrix3.git "$mrtrix_dir"
         cd "$mrtrix_dir"
     fi
-    
-    # Configura e compila
-    print_message "Configurazione e compilazione..."
+
+    # Configure and compile
+    print_message "Configuring and compiling..."
     ./configure
     ./build -parallel $(nproc)
-    
-    # Configurazione
+
+    # Configuration
     backup_config ~/.bashrc
     echo "# MRtrix3 Configuration" >> ~/.bashrc
     echo "export PATH=\"${mrtrix_dir}/bin:\$PATH\"" >> ~/.bashrc
     
-    print_success "MRtrix3 installato in $mrtrix_dir"
+    print_success "MRtrix3 installed in $mrtrix_dir"
 }
 
 install_c3d() {
-    print_header "INSTALLAZIONE Convert3D"
+    print_header "Convert3D INSTALLATION"
     
     local c3d_dir="${INSTALL_DIR}/c3d"
     local temp_file="/tmp/c3d_${C3D_VERSION}.tar.gz"
@@ -465,12 +607,12 @@ install_c3d() {
     echo "# Convert3D Configuration" >> ~/.bashrc
     echo "export PATH=\"${c3d_dir}/bin:\$PATH\"" >> ~/.bashrc
     
-    print_success "Convert3D installato in $c3d_dir"
+    print_success "Convert3D installed in $c3d_dir"
     rm -f "$temp_file"
 }
 
 install_conn() {
-    print_header "INSTALLAZIONE CONN"
+    print_header "CONN INSTALLATION"
     
     local conn_dir="${INSTALL_DIR}/conn"
     local conn_url="https://www.linode.com/static/images/products/one-click-apps/conn_standalone.zip"
@@ -483,38 +625,38 @@ install_conn() {
     
     # Richiede MATLAB
     if command_exists matlab; then
-        print_message "Aggiunta CONN a MATLAB path..."
+        print_message "Adding CONN to MATLAB path..."
         echo "addpath('$conn_dir'); savepath;" > /tmp/conn_setup.m
         matlab -batch "run('/tmp/conn_setup.m')"
     fi
-    
-    print_success "CONN installato in $conn_dir"
+
+    print_success "CONN installed in $conn_dir"
     rm -f /tmp/conn.zip
 }
 
 # ============================================================================
-# INSTALLAZIONE DOCKER
+# DOCKER INSTALLATION
 # ============================================================================
 
 install_docker() {
-    print_header "INSTALLAZIONE DOCKER"
+    print_header "DOCKER INSTALLATION"
     
     if command_exists apt-get; then
         # Ubuntu/Debian
-        print_message "Installazione Docker su Ubuntu/Debian..."
+        print_message "Installing Docker on Ubuntu/Debian..."
         
-        # Rimuovi versioni vecchie
+        # Remove old versions
         sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
         
-        # Installa dipendenze
+        # Install dependencies
         sudo apt-get update
         sudo apt-get install -y \
             ca-certificates \
             curl \
             gnupg \
             lsb-release
-        
-        # Aggiungi repository Docker
+
+        # Add Docker repository
         sudo mkdir -p /etc/apt/keyrings
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
             sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -523,74 +665,74 @@ install_docker() {
             "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
             $(lsb_release -cs) stable" | \
             sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        
-        # Installa Docker
+
+        # Install Docker
         sudo apt-get update
         sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
         
     elif command_exists yum; then
         # CentOS/RHEL
-        print_message "Installazione Docker su CentOS/RHEL..."
+        print_message "Installing Docker on CentOS/RHEL..."
         sudo yum install -y yum-utils
         sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
         sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
         
     elif command_exists dnf; then
         # Fedora
-        print_message "Installazione Docker su Fedora..."
+        print_message "Installing Docker on Fedora..."
         sudo dnf -y install dnf-plugins-core
         sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
         sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     fi
-    
-    # Avvia e abilita Docker
+
+    # Start and enable Docker
     sudo systemctl start docker
     sudo systemctl enable docker
     
     # Verifica installazione
     if docker --version >/dev/null 2>&1; then
-        print_success "Docker installato correttamente"
+        print_success "Docker installed correctly"
         docker --version
     else
-        print_error "Installazione Docker fallita"
+        print_error "Docker installation failed"
         return 1
     fi
 }
 
 # ============================================================================
-# INSTALLAZIONE FMRIPREP-DOCKER
+# FMRIPREP-DOCKER INSTALLATION
 # ============================================================================
 
 install_fmriprep_docker() {
-    print_header "CONFIGURAZIONE FMRIPREP-DOCKER"
-    
-    # Verifica Docker
+    print_header "FMRIPREP-DOCKER CONFIGURATION"
+
+    # Verify Docker
     if ! command_exists docker; then
-        print_error "Docker non trovato. Installazione Docker..."
+        print_error "Docker not found. Installing Docker..."
         install_docker
     fi
-    
-    # Verifica che Docker sia in esecuzione
+
+    # Verify that Docker is running
     if ! docker info >/dev/null 2>&1; then
-        print_warning "Docker non è in esecuzione. Avvio Docker..."
+        print_warning "Docker is not running. Starting Docker..."
         sudo systemctl start docker
         sleep 3
         if ! docker info >/dev/null 2>&1; then
-            print_error "Docker non può essere avviato. Avvialo manualmente con: sudo systemctl start docker"
+            print_error "Docker cannot be started. Start it manually with: sudo systemctl start docker"
             return 1
         fi
     fi
-    
-    # Aggiungi utente al gruppo docker se necessario
+
+    # Add user to docker group if necessary
     if ! groups | grep -q docker; then
-        print_warning "Aggiunta utente al gruppo docker..."
+        print_warning "Adding user to docker group..."
         sudo usermod -aG docker "$USER"
-        print_warning "IMPORTANTE: Riavvia la sessione per applicare le modifiche al gruppo docker"
-        print_warning "Oppure esegui: newgrp docker"
+        print_warning "IMPORTANT: Restart the session to apply the changes to the docker group"
+        print_warning "Or execute: newgrp docker"
     fi
-    
-    # Installa fmriprep-docker tramite pip nell'ambiente conda
-    print_message "Installazione fmriprep-docker wrapper..."
+
+    # Install fmriprep-docker via pip in the conda environment
+    print_message "Fmriprep-docker wrapper installation..."
     if [ -f "${CONDA_DIR}/bin/micromamba" ]; then
         "${CONDA_DIR}/bin/micromamba" run -n neuroimaging pip install fmriprep-docker
     elif command_exists conda; then
@@ -598,46 +740,46 @@ install_fmriprep_docker() {
     else
         pip install --user fmriprep-docker
     fi
-    
-    # Pre-download dell'immagine Docker di fMRIPrep (opzionale ma consigliato)
+
+    # Pre-download fMRIPrep docker image (optional but recommended)
     local fmriprep_version="${FMRIPREP_VERSION}"
     
     if [ "$SILENT_MODE" = false ]; then
-        read -p "Scaricare l'immagine Docker di fMRIPrep ${fmriprep_version}? (s/n): " -n 1 -r
+        read -p "Download the Docker image of fMRIPrep ${fmriprep_version}? (s/n): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Ss]$ ]]; then
-            print_message "Download immagine fMRIPrep ${fmriprep_version}... (potrebbe richiedere tempo)"
+            print_message "Download fMRIPrep image ${fmriprep_version}... (this may take time)"
             docker pull nipreps/fmriprep:${fmriprep_version}
-            print_success "Immagine fMRIPrep scaricata"
+            print_success "fMRIPrep image downloaded"
         fi
     fi
-    
-    # Crea directory per TemplateFlow
+
+    # Create directory for TemplateFlow
     local templateflow_dir="${INSTALL_DIR}/templateflow"
     mkdir -p "$templateflow_dir"
     
-    # Configura variabili d'ambiente
+    # Environment variables configuration
     backup_config ~/.bashrc
     echo "" >> ~/.bashrc
     echo "# fMRIPrep Configuration" >> ~/.bashrc
     echo "export TEMPLATEFLOW_HOME=\"${templateflow_dir}\"" >> ~/.bashrc
     echo "export FMRIPREP_VERSION=\"${fmriprep_version}\"" >> ~/.bashrc
     
-    # Crea script helper per fMRIPrep
+    # Create helper script for fMRIPrep
     create_fmriprep_helper_script
     
-    print_success "fMRIPrep-Docker configurato"
+    print_success "fMRIPrep-Docker configured"
     print_message "Versione: ${fmriprep_version}"
     print_message "TemplateFlow: ${templateflow_dir}"
     print_message "Script helper: ${INSTALL_DIR}/bin/run_fmriprep.sh"
 }
 
 install_mriqc_docker() {
-    print_header "CONFIGURAZIONE MRIQC-DOCKER"
+    print_header "MRIQC-DOCKER CONFIGURATION"
     
     # Verifica Docker
     if ! command_exists docker; then
-        print_error "Docker non trovato. Installazione Docker..."
+        print_error "Docker not found. Installing Docker..."
         install_docker
     fi
     
@@ -652,7 +794,7 @@ install_mriqc_docker() {
     local mriqc_version="${MRIQC_VERSION}"
     
     if [ "$SILENT_MODE" = false ]; then
-        read -p "Scaricare l'immagine Docker di MRIQC ${mriqc_version}? (s/n): " -n 1 -r
+        read -p "Download the Docker image of MRIQC ${mriqc_version}? (y/n): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Ss]$ ]]; then
             print_message "Download immagine MRIQC ${mriqc_version}..."
@@ -670,17 +812,17 @@ install_mriqc_docker() {
     # Crea script helper per MRIQC
     create_mriqc_helper_script
     
-    print_success "MRIQC-Docker configurato"
+    print_success "MRIQC-Docker configured"
     print_message "Versione: ${mriqc_version}"
     print_message "Script helper: ${INSTALL_DIR}/bin/run_mriqc.sh"
 }
 
 install_smriprep_docker() {
-    print_header "CONFIGURAZIONE SMRIPREP-DOCKER"
+    print_header "sMRIPrep-DOCKER CONFIGURATION"
     
     # Verifica Docker
     if ! command_exists docker; then
-        print_error "Docker non trovato. Installazione Docker..."
+        print_error "Docker not found. Installing Docker..."
         install_docker
     fi
     
@@ -695,7 +837,7 @@ install_smriprep_docker() {
     local smriprep_version="${SMRIPREP_VERSION}"
     
     if [ "$SILENT_MODE" = false ]; then
-        read -p "Scaricare l'immagine Docker di sMRIPrep ${smriprep_version}? (s/n): " -n 1 -r
+        read -p "Download the Docker image of sMRIPrep ${smriprep_version}? (y/n): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Ss]$ ]]; then
             print_message "Download immagine sMRIPrep ${smriprep_version}..."
@@ -717,7 +859,7 @@ install_smriprep_docker() {
     # Crea script helper per sMRIPrep
     create_smriprep_helper_script
     
-    print_success "sMRIPrep-Docker configurato"
+    print_success "sMRIPrep-Docker configured"
     print_message "Versione: ${smriprep_version}"
     print_message "Script helper: ${INSTALL_DIR}/bin/run_smriprep.sh"
 }
@@ -736,7 +878,7 @@ create_fmriprep_helper_script() {
 
 set -e
 
-# Colori
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -745,31 +887,31 @@ NC='\033[0m'
 
 print_usage() {
     cat << EOF
-Uso: $(basename "$0") [opzioni]
+Use: $(basename "$0") [options]
 
-Script helper per eseguire fMRIPrep con Docker
+Helper script to run fMRIPrep with Docker
 
-Opzioni:
-    -b, --bids-dir DIR          Directory BIDS input (richiesto)
-    -o, --output-dir DIR        Directory output (richiesto)
-    -p, --participant-label ID  Partecipante da processare (opzionale)
-    -w, --work-dir DIR          Directory di lavoro (default: ./work)
-    -f, --fs-license FILE       File licenza FreeSurfer
-    -v, --version VERSION       Versione fMRIPrep (default: da \$FMRIPREP_VERSION)
-    --skip-bids-validation      Salta validazione BIDS
-    --fs-no-reconall            Salta ricostruzione FreeSurfer
-    --use-aroma                 Usa ICA-AROMA per denoising
-    --mem MB                    Memoria massima (default: 16000)
-    --n-cpus N                  Numero CPU (default: auto)
-    -h, --help                  Mostra questo messaggio
+Options:
+    -b, --bids-dir DIR          BIDS input directory (required)
+    -o, --output-dir DIR        Output directory (required)
+    -p, --participant-label ID  Participant (optional)
+    -w, --work-dir DIR          Working directory (default: ./work)
+    -f, --fs-license FILE       FreeSurfer license file
+    -v, --version VERSION       fMRIPrep version (default: from \$FMRIPREP_VERSION)
+    --skip-bids-validation      Skip BIDS validation
+    --fs-no-reconall            Skip FreeSurfer reconstruction
+    --use-aroma                 Use ICA-AROMA for denoising
+    --mem MB                    Maximum memory (default: 16000)
+    --n-cpus N                  Number of CPUs (default: auto)
+    -h, --help                  Show this help message
 
-Esempio:
+Example:
     $(basename "$0") -b /data/bids -o /data/derivatives -p sub-01
 
 EOF
 }
 
-# Valori di default
+# Default values
 BIDS_DIR=""
 OUTPUT_DIR=""
 PARTICIPANT=""
@@ -841,42 +983,42 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Verifica parametri obbligatori
+# Verify required parameters
 if [ -z "$BIDS_DIR" ] || [ -z "$OUTPUT_DIR" ]; then
-    echo -e "${RED}Errore: --bids-dir e --output-dir sono obbligatori${NC}"
+    echo -e "${RED}Error: --bids-dir and --output-dir are required${NC}"
     print_usage
     exit 1
 fi
 
-# Verifica esistenza directory
+# Verify directory existence
 if [ ! -d "$BIDS_DIR" ]; then
-    echo -e "${RED}Errore: BIDS directory non trovata: $BIDS_DIR${NC}"
+    echo -e "${RED}Error: BIDS directory not found: $BIDS_DIR${NC}"
     exit 1
 fi
 
-# Verifica licenza FreeSurfer
+# Verify FreeSurfer license
 if [ ! -f "$FS_LICENSE" ]; then
-    echo -e "${YELLOW}Warning: Licenza FreeSurfer non trovata in $FS_LICENSE${NC}"
-    echo "Ottienila da: https://surfer.nmr.mgh.harvard.edu/registration.html"
-    read -p "Inserisci il percorso alla licenza FreeSurfer: " FS_LICENSE
+    echo -e "${YELLOW}Warning: FreeSurfer license not found in $FS_LICENSE${NC}"
+    echo "Get it from: https://surfer.nmr.mgh.harvard.edu/registration.html"
+    read -p "Enter the path to the FreeSurfer license file: " FS_LICENSE
     if [ ! -f "$FS_LICENSE" ]; then
-        echo -e "${RED}Errore: Licenza non valida${NC}"
+        echo -e "${RED}Error: Invalid license file${NC}"
         exit 1
     fi
 fi
 
-# Crea directory output e work se non esistono
+# Create output and work directories if they don't exist
 mkdir -p "$OUTPUT_DIR"
 mkdir -p "$WORK_DIR"
 
-# Converti path relativi in assoluti
+# Convert relative paths to absolute paths
 BIDS_DIR=$(realpath "$BIDS_DIR")
 OUTPUT_DIR=$(realpath "$OUTPUT_DIR")
 WORK_DIR=$(realpath "$WORK_DIR")
 FS_LICENSE=$(realpath "$FS_LICENSE")
 
-# Costruisci comando
-echo -e "${BLUE}=== Configurazione fMRIPrep ===${NC}"
+# Build command
+echo -e "${BLUE}=== fMRIPrep Configuration ===${NC}"
 echo "BIDS Directory: $BIDS_DIR"
 echo "Output Directory: $OUTPUT_DIR"
 echo "Work Directory: $WORK_DIR"
@@ -886,7 +1028,7 @@ echo "Memory: ${MEM_MB} MB"
 echo "CPUs: $N_CPUS"
 echo ""
 
-# Comando base
+# Base command
 CMD="docker run --rm -it \
     -v ${BIDS_DIR}:/data:ro \
     -v ${OUTPUT_DIR}:/out \
@@ -904,24 +1046,24 @@ CMD="docker run --rm -it \
     ${FS_NO_RECONALL} \
     ${USE_AROMA}"
 
-# Aggiungi partecipante se specificato
+# Add participant if specified
 if [ -n "$PARTICIPANT" ]; then
     CMD="$CMD --participant-label $PARTICIPANT"
 fi
 
-echo -e "${GREEN}Esecuzione fMRIPrep...${NC}"
+echo -e "${GREEN}Running fMRIPrep...${NC}"
 echo "$CMD"
 echo ""
 
 # Esegui
 eval $CMD
 
-echo -e "${GREEN}✓ fMRIPrep completato!${NC}"
+echo -e "${GREEN}fMRIPrep completed!${NC}"
 FMRIPREP_SCRIPT
     
     chmod +x "$helper_script"
-    
-    print_success "Script helper creato: $helper_script"
+
+    print_success "Script helper created: $helper_script"
 }
 
 create_mriqc_helper_script() {
@@ -946,22 +1088,22 @@ NC='\033[0m'
 
 print_usage() {
     cat << EOF
-Uso: $(basename "$0") [opzioni]
+Use: $(basename "$0") [options]
 
-Script helper per eseguire MRIQC con Docker
+Helper script to run MRIQC with Docker
 
-Opzioni:
-    -b, --bids-dir DIR          Directory BIDS input (richiesto)
-    -o, --output-dir DIR        Directory output (richiesto)
-    -p, --participant-label ID  Partecipante da processare (opzionale)
-    -w, --work-dir DIR          Directory di lavoro (default: ./work)
-    -v, --version VERSION       Versione MRIQC (default: da \$MRIQC_VERSION)
-    --modality TYPE             Modalità: T1w, bold, T2w (default: tutte)
-    --mem MB                    Memoria massima (default: 16000)
-    --n-cpus N                  Numero CPU (default: auto)
-    -h, --help                  Mostra questo messaggio
+Options:
+    -b, --bids-dir DIR          BIDS input directory (required)
+    -o, --output-dir DIR        Output directory (required)
+    -p, --participant-label ID  Participant to process (optional)
+    -w, --work-dir DIR          Working directory (default: ./work)
+    -v, --version VERSION       MRIQC version (default: from \$MRIQC_VERSION)
+    --modality TYPE             Modality: T1w, bold, T2w (default: all)
+    --mem MB                    Max Memory (default: 16000)
+    --n-cpus N                  Number of CPUs (default: auto)
+    -h, --help                  Show this message
 
-Esempio:
+Example:
     $(basename "$0") -b /data/bids -o /data/mriqc_out -p sub-01
 
 EOF
@@ -987,18 +1129,18 @@ while [[ $# -gt 0 ]]; do
         --mem) MEM_MB="$2"; shift 2 ;;
         --n-cpus) N_CPUS="$2"; shift 2 ;;
         -h|--help) print_usage; exit 0 ;;
-        *) echo -e "${RED}Errore: opzione sconosciuta $1${NC}"; print_usage; exit 1 ;;
+        *) echo -e "${RED}Error: unknown option $1${NC}"; print_usage; exit 1 ;;
     esac
 done
 
 if [ -z "$BIDS_DIR" ] || [ -z "$OUTPUT_DIR" ]; then
-    echo -e "${RED}Errore: --bids-dir e --output-dir sono obbligatori${NC}"
+    echo -e "${RED}Error: --bids-dir and --output-dir are required${NC}"
     print_usage
     exit 1
 fi
 
 if [ ! -d "$BIDS_DIR" ]; then
-    echo -e "${RED}Errore: BIDS directory non trovata: $BIDS_DIR${NC}"
+    echo -e "${RED}Error: BIDS directory not found: $BIDS_DIR${NC}"
     exit 1
 fi
 
@@ -1009,7 +1151,7 @@ BIDS_DIR=$(realpath "$BIDS_DIR")
 OUTPUT_DIR=$(realpath "$OUTPUT_DIR")
 WORK_DIR=$(realpath "$WORK_DIR")
 
-echo -e "${BLUE}=== Configurazione MRIQC ===${NC}"
+echo -e "${BLUE}=== Configuration MRIQC ===${NC}"
 echo "BIDS Directory: $BIDS_DIR"
 echo "Output Directory: $OUTPUT_DIR"
 echo "Work Directory: $WORK_DIR"
@@ -1033,18 +1175,18 @@ if [ -n "$PARTICIPANT" ]; then
     CMD="$CMD --participant-label $PARTICIPANT"
 fi
 
-echo -e "${GREEN}Esecuzione MRIQC...${NC}"
+echo -e "${GREEN}Running MRIQC...${NC}"
 echo "$CMD"
 echo ""
 
 eval $CMD
 
-echo -e "${GREEN}✓ MRIQC completato!${NC}"
-echo -e "${BLUE}Report disponibile in: ${OUTPUT_DIR}${NC}"
+echo -e "${GREEN}MRIQC completed!${NC}"
+echo -e "${BLUE}Report available in: ${OUTPUT_DIR}${NC}"
 MRIQC_SCRIPT
     
     chmod +x "$helper_script"
-    print_success "Script MRIQC helper creato: $helper_script"
+    print_success "Script MRIQC helper created: $helper_script"
 }
 
 create_smriprep_helper_script() {
@@ -1069,23 +1211,24 @@ NC='\033[0m'
 
 print_usage() {
     cat << EOF
-Uso: $(basename "$0") [opzioni]
+Usage: $(basename "$0") [options]
 
-Script helper per eseguire sMRIPrep con Docker
+Helper script to run sMRIPrep with Docker
 
-Opzioni:
-    -b, --bids-dir DIR          Directory BIDS input (richiesto)
-    -o, --output-dir DIR        Directory output (richiesto)
-    -p, --participant-label ID  Partecipante da processare (opzionale)
-    -w, --work-dir DIR          Directory di lavoro (default: ./work)
-    -f, --fs-license FILE       File licenza FreeSurfer
-    -v, --version VERSION       Versione sMRIPrep (default: da \$SMRIPREP_VERSION)
-    --fs-no-reconall            Salta ricostruzione FreeSurfer
-    --mem MB                    Memoria massima (default: 16000)
-    --n-cpus N                  Numero CPU (default: auto)
-    -h, --help                  Mostra questo messaggio
+Options:
+    -b, --bids-dir DIR          Directory BIDS input (required)
+    -o, --output-dir DIR        Directory output (required)
+    -p, --participant-label ID  Participant (optional)
+    -w, --work-dir DIR          Working directory (default: ./work)
+    -f, --fs-license FILE       FreeSurfer license file
+    -v, --version VERSION       sMRIPrep version (default: from \$SMRIPREP_VERSION)
+    --fs-no-reconall            Skip FreeSurfer reconstruction
+    --mem MB                    Max memory (default: 16000)
+    --n-cpus N                  Number of CPUs (default: auto)
 
-Esempio:
+    -h, --help                  Show this message
+
+Example:
     $(basename "$0") -b /data/bids -o /data/derivatives -p sub-01
 
 EOF
@@ -1113,26 +1256,26 @@ while [[ $# -gt 0 ]]; do
         --mem) MEM_MB="$2"; shift 2 ;;
         --n-cpus) N_CPUS="$2"; shift 2 ;;
         -h|--help) print_usage; exit 0 ;;
-        *) echo -e "${RED}Errore: opzione sconosciuta $1${NC}"; print_usage; exit 1 ;;
+        *) echo -e "${RED}Error: unknown option $1${NC}"; print_usage; exit 1 ;;
     esac
 done
 
 if [ -z "$BIDS_DIR" ] || [ -z "$OUTPUT_DIR" ]; then
-    echo -e "${RED}Errore: --bids-dir e --output-dir sono obbligatori${NC}"
+    echo -e "${RED}Error: --bids-dir and --output-dir are required${NC}"
     print_usage
     exit 1
 fi
 
 if [ ! -d "$BIDS_DIR" ]; then
-    echo -e "${RED}Errore: BIDS directory non trovata: $BIDS_DIR${NC}"
+    echo -e "${RED}Error: BIDS directory not found: $BIDS_DIR${NC}"
     exit 1
 fi
 
 if [ ! -f "$FS_LICENSE" ]; then
-    echo -e "${YELLOW}Warning: Licenza FreeSurfer non trovata in $FS_LICENSE${NC}"
-    read -p "Inserisci il percorso alla licenza FreeSurfer: " FS_LICENSE
+    echo -e "${YELLOW}Warning: FreeSurfer license not found in $FS_LICENSE${NC}"
+    read -p "Insert FreeSurfer license path: " FS_LICENSE
     if [ ! -f "$FS_LICENSE" ]; then
-        echo -e "${RED}Errore: Licenza non valida${NC}"
+        echo -e "${RED}Error: Not valid FreeSurfer license${NC}"
         exit 1
     fi
 fi
@@ -1145,7 +1288,7 @@ OUTPUT_DIR=$(realpath "$OUTPUT_DIR")
 WORK_DIR=$(realpath "$WORK_DIR")
 FS_LICENSE=$(realpath "$FS_LICENSE")
 
-echo -e "${BLUE}=== Configurazione sMRIPrep ===${NC}"
+echo -e "${BLUE}=== sMRIPrep Configuration ===${NC}"
 echo "BIDS Directory: $BIDS_DIR"
 echo "Output Directory: $OUTPUT_DIR"
 echo "Work Directory: $WORK_DIR"
@@ -1171,30 +1314,30 @@ if [ -n "$PARTICIPANT" ]; then
     CMD="$CMD --participant-label $PARTICIPANT"
 fi
 
-echo -e "${GREEN}Esecuzione sMRIPrep...${NC}"
+echo -e "${GREEN}Running sMRIPrep...${NC}"
 echo "$CMD"
 echo ""
 
 eval $CMD
 
-echo -e "${GREEN}✓ sMRIPrep completato!${NC}"
+echo -e "${GREEN}sMRIPrep completed!${NC}"
 SMRIPREP_SCRIPT
     
     chmod +x "$helper_script"
-    print_success "Script sMRIPrep helper creato: $helper_script"
+    print_success "sMRIPrep helper script created in: $helper_script"
 }
 
 # ============================================================================
-# CREAZIONE AMBIENTE CONDA/MAMBA
+# CONDA/MAMBA ENVIRONMENT CREATION
 # ============================================================================
 
 create_conda_environment() {
-    print_header "CREAZIONE AMBIENTE CONDA/MAMBA"
+    print_header "CONDA/MAMBA ENVIRONMENT CREATION"
     
     local env_file="${CONFIG_DIR}/neuroimaging_env.yml"
     
     if [ ! -f "$env_file" ]; then
-        # Crea file YAML di default
+        # Create default YAML file
         cat > "$env_file" << 'EOF'
 name: neuroimaging
 channels:
@@ -1248,29 +1391,29 @@ dependencies:
     - fmriprep-docker
     - templateflow
 EOF
-        print_message "Creato file ambiente di default: $env_file"
+        print_message "Created default environment file: $env_file"
     fi
-    
-    # Installa ambiente
+
+    # Install environment
     if command_exists micromamba || [ -f "${CONDA_DIR}/bin/micromamba" ]; then
         local mamba_cmd="${CONDA_DIR}/bin/micromamba"
         "$mamba_cmd" env create -f "$env_file" -y
-        print_success "Ambiente creato con micromamba"
+        print_success "Micromamba environment created"
     elif command_exists conda; then
         conda env create -f "$env_file" -y
-        print_success "Ambiente creato con conda"
+        print_success "Conda environment created"
     else
-        print_warning "Né conda né micromamba trovati"
+        print_warning "Conda/Micromamba not found. Installing Miniconda..."
         return 1
     fi
 }
 
 # ============================================================================
-# ESPORTAZIONE CONTAINER
+# EXPORT DOCKER CONTAINER
 # ============================================================================
 
 export_to_container() {
-    print_header "CREAZIONE DOCKER CONTAINER"
+    print_header "CREATING DOCKER CONTAINER"
     
     local dockerfile="${CONFIG_DIR}/Dockerfile.neuroimaging"
     
@@ -1278,7 +1421,7 @@ export_to_container() {
         cat > "$dockerfile" << 'EOF'
 FROM ubuntu:22.04
 
-# Installa dipendenze
+# Install dependencies
 RUN apt-get update && apt-get install -y \
     wget curl git build-essential unzip tcsh \
     python3 python3-pip python3-dev python3-venv \
@@ -1289,10 +1432,10 @@ RUN apt-get update && apt-get install -y \
     libopenblas-dev libfftw3-dev libnifti-dev \
     libtool automake autoconf cmake g++ gcc \
     perl xfonts-base gnome-tweak-tool \
-    libjpeg62 xvfb xterm vim netpbm libxp6 \
+    libjpeg62 xvfb xterm vim netpbm \
     && rm -rf /var/lib/apt/lists/*
 
-# Crea utente neuro
+# Create user neuro
 RUN useradd -m -s /bin/bash neuro && \
     mkdir -p /neuroimaging && \
     chown -R neuro:neuro /neuroimaging
@@ -1300,14 +1443,14 @@ RUN useradd -m -s /bin/bash neuro && \
 USER neuro
 WORKDIR /home/neuro
 
-# Copia script di installazione
+# Copy installation script
 COPY --chown=neuro:neuro neuroimaging_installer.sh /home/neuro/
 COPY --chown=neuro:neuro config/neuroimaging_env.yml /home/neuro/
 
-# Esegui installazione (modalità silenziosa)
+# Run installation (silent mode)
 RUN bash neuroimaging_installer.sh -a -y
 
-# Configura ambiente
+# Environment variables
 ENV FSLDIR=/neuroimaging/fsl
 ENV FREESURFER_HOME=/neuroimaging/freesurfer
 ENV ANTSPATH=/neuroimaging/ants
@@ -1315,22 +1458,21 @@ ENV PATH="/neuroimaging/abin:/neuroimaging/fsl/bin:/neuroimaging/ants:/neuroimag
 ENV FS_LICENSE=/neuroimaging/config/license.txt
 ENV SUBJECTS_DIR=/neuroimaging/freesurfer_subjects
 
-# Directory di lavoro
+# Working directory
 WORKDIR /data
 VOLUME /data
 
 CMD ["/bin/bash"]
 EOF
-        print_message "Creato Dockerfile: $dockerfile"
+        print_message "Created Dockerfile: $dockerfile"
     fi
-    
-    # Costruisci immagine
+
+    # Build image
     if command_exists docker; then
-        print_message "Costruzione immagine Docker..."
+        print_message "Building Docker image..."
         docker build -f "$dockerfile" -t neuroimaging:latest .
-        print_success "Immagine Docker creata: neuroimaging:latest"
-        
-        # Crea script per eseguire container
+        print_success "Docker image created: neuroimaging:latest"
+        # Create script for running container
         cat > "${INSTALL_DIR}/run_neuroimaging_container.sh" << 'EOF'
 #!/bin/bash
 docker run -it --rm \
@@ -1339,9 +1481,9 @@ docker run -it --rm \
     neuroimaging:latest
 EOF
         chmod +x "${INSTALL_DIR}/run_neuroimaging_container.sh"
-        print_success "Script esecuzione creato: ${INSTALL_DIR}/run_neuroimaging_container.sh"
+        print_success "Script created: ${INSTALL_DIR}/run_neuroimaging_container.sh"
     else
-        print_error "Docker non installato"
+        print_error "Docker not installed. Cannot create container."
         return 1
     fi
 }
@@ -1354,7 +1496,7 @@ parse_config_file() {
     local config_file="$1"
     
     if [ -f "$config_file" ]; then
-        print_message "Lettura file configurazione: $config_file"
+        print_message "Reading configuration file: $config_file"
         
         # Formato semplice: software=versione
         while IFS='=' read -r key value; do
@@ -1378,118 +1520,134 @@ parse_config_file() {
 }
 
 cleanup_error() {
-    print_error "Errore durante l'installazione"
-    print_message "Log disponibile in: ${LOG_DIR}/error_$(date +%Y%m%d_%H%M%S).log"
+    print_error "Error during installation. Cleaning up..."
+    print_message "Check Log file in: ${LOG_DIR}/error_$(date +%Y%m%d_%H%M%S).log"
     exit 1
 }
 
 verify_installation() {
-    print_header "VERIFICA INSTALLAZIONE"
+    print_header "CHECK INSTALLATION"
     
     local verification_log="${LOG_DIR}/verification_$(date +%Y%m%d_%H%M%S).log"
     
-    echo "=== Verifica installazione $(date) ===" > "$verification_log"
+    echo "=== Installation check $(date) ===" > "$verification_log"
     
     for software in "${!INSTALL_SOFTWARE[@]}"; do
         if [ "${INSTALL_SOFTWARE[$software]}" = true ]; then
             case $software in
                 fsl)
                     if [ -f "${INSTALL_DIR}/fsl/bin/fsl" ]; then
-                        echo "✓ FSL: OK" | tee -a "$verification_log"
+                        echo "FSL: OK" | tee -a "$verification_log"
                     else
-                        echo "✗ FSL: FAILED" | tee -a "$verification_log"
+                        echo "FSL: FAILED" | tee -a "$verification_log"
                     fi
                     ;;
                 freesurfer)
                     if [ -f "${INSTALL_DIR}/freesurfer/bin/recon-all" ]; then
-                        echo "✓ FreeSurfer: OK" | tee -a "$verification_log"
+                        echo "FreeSurfer: OK" | tee -a "$verification_log"
                     else
-                        echo "✗ FreeSurfer: FAILED" | tee -a "$verification_log"
+                        echo "FreeSurfer: FAILED" | tee -a "$verification_log"
                     fi
                     ;;
                 ants)
-                    if [ -f "${INSTALL_DIR}/ants/antsRegistration" ]; then
-                        echo "✓ ANTs: OK" | tee -a "$verification_log"
+                    if [ -x "${INSTALL_DIR}/ants/antsRegistration" ] || [ -x "${INSTALL_DIR}/ants/bin/antsRegistration" ] || command_exists antsRegistration; then
+                        echo "ANTs: OK" | tee -a "$verification_log"
                     else
-                        echo "✗ ANTs: FAILED" | tee -a "$verification_log"
+                        echo "ANTs: FAILED" | tee -a "$verification_log"
+                    fi
+                    ;;
+                dcm2niix)
+                    if [ -f "/usr/bin/dcm2niix" ] || command_exists dcm2niix; then
+                        echo "dcm2niix: OK" | tee -a "$verification_log"
+                    else
+                        echo "dcm2niix: FAILED" | tee -a "$verification_log"
+                    fi
+                    ;;
+                dcm2bids)
+                    if [ -f "/usr/bin/dcm2bids" ] || command_exists dcm2bids; then
+                        echo "dcm2bids: OK" | tee -a "$verification_log"
+                    else
+                        echo "dcm2bids: FAILED" | tee -a "$verification_log"
                     fi
                     ;;
                 fmriprep)
                     if command_exists docker && docker images | grep -q fmriprep; then
-                        echo "✓ fMRIPrep-Docker: OK" | tee -a "$verification_log"
+                        echo "fMRIPrep-Docker: OK" | tee -a "$verification_log"
                     else
-                        echo "✗ fMRIPrep-Docker: FAILED" | tee -a "$verification_log"
+                        echo "fMRIPrep-Docker: FAILED" | tee -a "$verification_log"
                     fi
                     ;;
                 mriqc)
                     if command_exists docker && docker images | grep -q mriqc; then
-                        echo "✓ MRIQC-Docker: OK" | tee -a "$verification_log"
+                        echo "MRIQC-Docker: OK" | tee -a "$verification_log"
                     else
-                        echo "✗ MRIQC-Docker: FAILED" | tee -a "$verification_log"
+                        echo "MRIQC-Docker: FAILED" | tee -a "$verification_log"
                     fi
                     ;;
                 smriprep)
                     if command_exists docker && docker images | grep -q smriprep; then
-                        echo "✓ sMRIPrep-Docker: OK" | tee -a "$verification_log"
+                        echo "sMRIPrep-Docker: OK" | tee -a "$verification_log"
                     else
-                        echo "✗ sMRIPrep-Docker: FAILED" | tee -a "$verification_log"
+                        echo "sMRIPrep-Docker: FAILED" | tee -a "$verification_log"
                     fi
                     ;;
             esac
         fi
     done
-    
-    print_success "Verifica completata. Log: $verification_log"
+
+    print_success "Checking completed. Log: $verification_log"
 }
 
 show_help() {
     cat << EOF
-Uso: $(basename "$0") [opzioni]
+Use: $(basename "$0") [options]
 
-Opzioni:
-    -a              Installa tutto
-    -f              Installa FSL
-    -r              Installa FreeSurfer
-    -n              Installa ANTs
-    -i              Installa AFNI
-    -m              Installa MRtrix3
-    -c              Installa Convert3D
-    -s              Installa SPM
-    -t              Installa CONN
-    -p              Installa fMRIPrep-Docker
-    -q              Installa MRIQC-Docker
-    -e              Installa sMRIPrep-Docker
-    -d              Crea ambiente conda
-    -g              Esporta a container Docker
-    -y              Modalità silenziosa
-    -u FILE         Usa file di configurazione
-    -h              Mostra questo help
+Options:
+    -a              Install all software
+    -f              Install FSL
+    -r              Install FreeSurfer
+    -n              Install ANTs
+    -i              Install AFNI
+    -m              Install MRtrix3
+    -c              Install Convert3D
+    -s              Install SPM
+    -t              Install CONN
+    -p              Install fMRIPrep-Docker
+    -q              Install MRIQC-Docker
+    -e              Install sMRIPrep-Docker
+    -z              Install dcm2niix
+    -b              Install dcm2bids
+    -d              Create conda environment
+    -g              Export to Docker container
+    -y              Silent mode
+    -u FILE         Use configuration file
+    -h              Show this help
 
-Esempi:
-    # Installa tutto
+Examples:
+    # Install all software
     $(basename "$0") -a
-    
-    # Installa solo FSL e fMRIPrep
+
+    # Install only FSL and fMRIPrep
     $(basename "$0") -f -p
-    
-    # Installa suite completa NiPreps (fMRIPrep, MRIQC, sMRIPrep)
+
+    # Install complete NiPreps suite (fMRIPrep, MRIQC, sMRIPrep)
     $(basename "$0") -p -q -e
-    
-    # Installa da file di configurazione
+
+    # Install from configuration file
     $(basename "$0") -u config.txt
 
 EOF
 }
 
 # ============================================================================
-# MAIN
+# MAIN FUNCTION
 # ============================================================================
 
 main() {
     print_header "NEUROIMAGING ENVIRONMENT INSTALLER"
     
-    # Parsing argomenti
-    while getopts "afnismcrtpdqeyhu:g:" opt; do
+    # Parsing argoments
+    while getopts "afnismcrtpdqeyzbhu:g:" opt; do
         case ${opt} in
             a) INSTALL_ALL=true ;;
             f) INSTALL_SOFTWARE["fsl"]=true ;;
@@ -1503,34 +1661,57 @@ main() {
             p) INSTALL_SOFTWARE["fmriprep"]=true ;;
             q) INSTALL_SOFTWARE["mriqc"]=true ;;
             e) INSTALL_SOFTWARE["smriprep"]=true ;;
+            z) INSTALL_SOFTWARE["dcm2niix"]=true ;;
+            b) INSTALL_SOFTWARE["dcm2bids"]=true ;;
             d) CREATE_CONDA_ENV=true ;;
             y) SILENT_MODE=true ;;
             u) parse_config_file "$OPTARG" ;;
             g) EXPORT_CONTAINER=true ;;
             h) show_help; exit 0 ;;
-            \?) print_error "Opzione non valida"; show_help; exit 1 ;;
+            \?) print_error "not a valid option"; show_help; exit 1 ;;
         esac
     done
     
-    # Se -a, installa tutto
+    # If -a, install all software
     if [ "$INSTALL_ALL" = true ]; then
         for software in "${!INSTALL_SOFTWARE[@]}"; do
             INSTALL_SOFTWARE["$software"]=true
         done
         CREATE_CONDA_ENV=true
     fi
+
+    # Check if any software/action was selected
+    local any_selected=false
+    for s in "${!INSTALL_SOFTWARE[@]}"; do
+        if [ "${INSTALL_SOFTWARE[$s]}" = true ]; then
+            any_selected=true
+            break
+        fi
+    done
     
-    # Inizializzazione
+    # Also treat conda/container creation as a selected action
+    if [ "$CREATE_CONDA_ENV" = true ] || [ "$EXPORT_CONTAINER" = true ]; then
+        any_selected=true
+    fi
+
+    # If nothing selected, show help and exit
+    if [ "$any_selected" = false ]; then
+        print_warning "No software/action selected. Showing help and exiting."
+        show_help
+        exit 0
+    fi
+    
+    # Initial setup
     create_dirs
     local log_file="${LOG_DIR}/install_$(date +%Y%m%d_%H%M%S).log"
     exec > >(tee -a "$log_file") 2>&1
-    
-    # Installazione dipendenze
+
+    # Install system dependencies if needed
     if [ "$SKIP_DEPENDENCIES" = false ]; then
         install_system_dependencies
     fi
-    
-    # Installazione software
+
+    # Software installation
     for software in "${!INSTALL_SOFTWARE[@]}"; do
         if [ "${INSTALL_SOFTWARE[$software]}" = true ]; then
             case $software in
@@ -1540,6 +1721,8 @@ main() {
                 afni) install_afni ;;
                 mrtrix) install_mrtrix ;;
                 c3d) install_c3d ;;
+                dcm2niix) install_dcm2niix ;;
+                dcm2bids) install_dcm2bids ;;
                 conn) install_conn ;;
                 micromamba) install_micromamba ;;
                 fmriprep) install_fmriprep_docker ;;
@@ -1549,7 +1732,7 @@ main() {
         fi
     done
     
-    # Ambiente conda
+    # Conda environment
     if [ "$CREATE_CONDA_ENV" = true ]; then
         create_conda_environment
     fi
@@ -1559,22 +1742,22 @@ main() {
         export_to_container
     fi
     
-    # Verifica
+    # Verify installation
     verify_installation
     
-    # Riepilogo
-    print_header "INSTALLAZIONE COMPLETATA"
-    echo -e "${GREEN}${BOLD}✓ Ambiente neuroimaging configurato con successo!${NC}"
+    # Summary
+    print_header "INSTALLATION COMPLETED"
+    echo -e "${GREEN}${BOLD}Neuroimaging environment configured successfully!${NC}"
     echo ""
     echo "Install Directory: $INSTALL_DIR"
     echo "Log File: $log_file"
     echo ""
-    echo "Per configurare l'ambiente:"
+    echo "To configure the environment:"
     echo "  source ~/.bashrc"
     echo ""
     
     if [ "$CREATE_CONDA_ENV" = true ]; then
-        echo "Per attivare l'ambiente conda:"
+        echo "To activate the conda environment:"
         if [ -f "${CONDA_DIR}/bin/micromamba" ]; then
             echo "  micromamba activate neuroimaging"
         else
@@ -1584,28 +1767,28 @@ main() {
     fi
     
     if [ "${INSTALL_SOFTWARE[fmriprep]}" = true ]; then
-        echo "Per eseguire fMRIPrep:"
+        echo "To run fMRIPrep:"
         echo "  ${INSTALL_DIR}/bin/run_fmriprep.sh -b <bids_dir> -o <output_dir>"
         echo ""
     fi
     
     if [ "${INSTALL_SOFTWARE[mriqc]}" = true ]; then
-        echo "Per eseguire MRIQC (quality control):"
+        echo "To run MRIQC (quality control):"
         echo "  ${INSTALL_DIR}/bin/run_mriqc.sh -b <bids_dir> -o <output_dir>"
         echo ""
     fi
     
     if [ "${INSTALL_SOFTWARE[smriprep]}" = true ]; then
-        echo "Per eseguire sMRIPrep (anatomical preprocessing):"
+        echo "To run sMRIPrep (anatomical preprocessing):"
         echo "  ${INSTALL_DIR}/bin/run_smriprep.sh -b <bids_dir> -o <output_dir>"
         echo ""
     fi
     
     if [ "$EXPORT_CONTAINER" = true ]; then
-        echo "Container Docker creato:"
+        echo "Docker container created:"
         echo "  ${INSTALL_DIR}/run_neuroimaging_container.sh"
     fi
 }
 
-# Avvio
+# Run
 main "$@"
