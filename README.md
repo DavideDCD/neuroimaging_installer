@@ -236,26 +236,6 @@ Expected output:
 
 ✓ GPU detected and configured
 
-### GPU Configuration
-
-## Check CUDA Support
-
-./neuroimaging_installer.sh --check-gpu
-
-## Installation with GPU Support
-
-# Install with CUDA 12 support
-
-./neuroimaging_installer.sh -a -y --cuda-version 12.6
-
-# Deep learning only (PyTorch + MONAI)
-
-./neuroimaging_installer.sh --deep-learning --gpu
-
-## GPU Benchmark
-
-python tests/benchmark_gpu.py --mode full
-
 ### Troubleshooting
 
 ## Common Problems
