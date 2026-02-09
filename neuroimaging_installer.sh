@@ -34,9 +34,9 @@ BACKUP_DIR="${INSTALL_DIR}/backup"
 # Software versions
 FSL_VERSION="6.0.7.1"
 FREESURFER_VERSION="8.1.0"
-ANTs_VERSION="2.6.4"
+ANTs_VERSION="2.6.5"
 AFNI_VERSION="latest"
-MRTRIX_VERSION="3.0.3"
+MRTRIX_VERSION="3.0.8"
 MINICONDA_VERSION="latest"
 C3D_VERSION="1.4.0"
 SPM_VERSION="25.01.02"
@@ -57,7 +57,7 @@ declare -A DOWNLOAD_URLS=(
 
 # Platform-specific download URLs
 if command -v apt-get >/dev/null 2>&1; then
-    DOWNLOAD_URLS["ants"]="https://github.com/ANTsX/ANTs/releases/download/v${ANTs_VERSION}/ants-${ANTs_VERSION}-ubuntu20.04-X64-gcc.zip"
+    DOWNLOAD_URLS["ants"]="https://github.com/ANTsX/ANTs/releases/download/v${ANTs_VERSION}/ants-${ANTs_VERSION}-ubuntu-24.04-X64-gcc.zip"
     DOWNLOAD_URLS["dcm2bids"]="https://github.com/UNFmontreal/Dcm2Bids/releases/download/${DCM2BIDS_VERSION}/dcm2bids_debian-based_${DCM2BIDS_VERSION}.tar.gz"
     DOWNLOAD_URLS["freesurfer"]="https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/${FREESURFER_VERSION}/freesurfer_ubuntu22-${FREESURFER_VERSION}_amd64.deb"
 elif command -v yum >/dev/null 2>&1; then
@@ -198,6 +198,45 @@ check_online_version() {
     return 0
 }
 
+update_download_url () {
+    # check which software and update the version
+    local software=$1
+    local version=$2
+    if command -v apt-get >/dev/null 2>&1; then
+        case $software in
+            freesurfer)
+                echo "https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/${version}/freesurfer_ubuntu22-${version}_amd64.deb"
+                ;;
+            ants)
+                echo "https://github.com/ANTsX/ANTs/releases/download/v${version}/ants-${version}-ubuntu-24.04-X64-gcc.zip"
+                ;;
+            dcm2bids)
+                echo "https://github.com/UNFmontreal/Dcm2Bids/releases/download/${version}/dcm2bids_debian-based_${version}.tar.gz"
+                ;;
+            *)
+                print_warning "Download URL not implemented for $software"
+                return 1
+                ;;
+        esac
+    elif command -v yum >/dev/null 2>&1; then
+        case $software in
+            freesurfer)
+                echo "https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/${version}/freesurfer_CentOS7-${version}-1.x86_64.rpm"
+                ;;
+            ants)
+                echo "https://github.com/ANTsX/ANTs/releases/download/v${version}/ants-${version}-centos7-X64-gcc.zip"
+                ;;
+            dcm2bids)
+                echo "https://github.com/UNFmontreal/Dcm2Bids/releases/download/${version}/dcm2bids_rhel-based_${version}.tar.gz"
+                ;;
+            *)
+                print_warning "Download URL not implemented for $software"
+                return 1
+                ;; 
+        esac
+    fi
+}
+
 # ============================================================================
 # SOFTWARE INSTALLATION
 # ============================================================================
@@ -213,23 +252,23 @@ install_system_dependencies() {
             libgl1-mesa-dev libglu1-mesa-dev libglw1-mesa \
             libgomp1 libjpeg62-dev libxml2-dev libxslt1-dev \
             libeigen3-dev zlib1g-dev libqt5core5a libqt5gui5 \
-            libqt5widgets5 libqt5opengl5 libqt5svg5-dev \
+            libqt5widgets5 libqt5opengl5-dev libqt5svg5-dev \
             libopenblas-dev libfftw3-dev libnifti-dev \
             libtool automake autoconf cmake g++ gcc \
             perl tcsh xfonts-base python-is-python3 \
             gnome-tweak-tool libjpeg62 xvfb xterm vim \
-            netpbm gnome-tweak-tool
+            libpng-dev netpbm gnome-tweak-tool
         
     elif command_exists yum; then
         sudo yum install -y \
-            wget curl git gcc-c++ make unzip tcsh \
+            wget curl git g++ gcc-c++ make unzip tcsh \
             python3 python3-pip python3-devel \
             mesa-libGL-devel mesa-libGLU-devel \
             libjpeg-turbo-devel libxml2-devel libxslt-devel \
-            eigen3-devel zlib-devel qt5-qtbase-devel \
-            qt5-qtsvg-devel openblas-devel fftw-devel \
+            eigen3-devel zlib-devel qt5-qtbase-devel libqt5-devel \
+            qt5-qtsvg-devel openblas-devel fftw-devel libgl1-mesa-dev \
             libtool automake autoconf cmake gcc perl \
-            libXp netpbm-progs
+            libXp netpbm-progs libtiff-devel libpng-devel
         
     elif command_exists dnf; then
         sudo dnf install -y \
@@ -438,13 +477,24 @@ install_freesurfer() {
     fi
     
     # Download
-    local temp_file="/tmp/freesurfer_${FREESURFER_VERSION}.tar.gz"
     print_message "Download FreeSurfer ${FREESURFER_VERSION}..."
-    wget --progress=bar:force "${DOWNLOAD_URLS[freesurfer]}" -O "$temp_file"
-    
-    # Extraction
     mkdir -p "$fs_dir"
-    tar -xzf "$temp_file" -C "$fs_dir" --strip-components=1
+    # check if DOWNLOAD_URLS["freesurfer"] is pointing to .deb or .rpm and handle accordingly
+    case "${DOWNLOAD_URLS[freesurfer]}" in
+        *.deb)
+            print_message "Downloading FreeSurfer ${FREESURFER_VERSION} (deb package)..."
+            wget --progress=bar:force "${DOWNLOAD_URLS[freesurfer]}" -O "/tmp/freesurfer_${FREESURFER_VERSION}.deb"
+            sudo dpkg -i "/tmp/freesurfer_${FREESURFER_VERSION}.deb"
+            rm -f "/tmp/freesurfer_${FREESURFER_VERSION}.deb"
+            ;;
+        *.rpm)
+            print_message "Downloading FreeSurfer ${FREESURFER_VERSION} (rpm package)..."
+            wget --progress=bar:force "${DOWNLOAD_URLS[freesurfer]}" -O "/tmp/freesurfer_${FREESURFER_VERSION}.rpm"
+            sudo rpm -i "/tmp/freesurfer_${FREESURFER_VERSION}.rpm"
+            rm -f "/tmp/freesurfer_${FREESURFER_VERSION}.rpm"
+            ;;
+    esac
+    local temp_file="/tmp/freesurfer_${FREESURFER_VERSION}"
     
     # Configuration
     backup_config ~/.bashrc
@@ -582,7 +632,7 @@ install_mrtrix() {
     # Configure and compile
     print_message "Configuring and compiling..."
     ./configure
-    ./build -parallel $(nproc)
+    ./build
 
     # Configuration
     backup_config ~/.bashrc
