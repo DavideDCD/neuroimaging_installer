@@ -256,8 +256,8 @@ install_system_dependencies() {
             libopenblas-dev libfftw3-dev libnifti-dev \
             libtool automake autoconf cmake g++ gcc \
             perl tcsh xfonts-base python-is-python3 \
-            gnome-tweak-tool libjpeg62 xvfb xterm vim \
-            libpng-dev netpbm gnome-tweak-tool
+            libjpeg62 xvfb xterm vim \
+            libpng-dev netpbm
         
     elif command_exists yum; then
         sudo yum install -y \
@@ -456,7 +456,7 @@ install_dcm2bids() {
 install_freesurfer() {
     print_header "FREESURFER INSTALLATION"
     
-    local fs_dir="${INSTALL_DIR}/freesurfer"
+    local fs_dir="/usr/local/freesurfer"
     local license_file="${CONFIG_DIR}/license.txt"
     
     if [ -d "$fs_dir" ] && [ "$FORCE_INSTALL" = false ]; then
@@ -478,10 +478,15 @@ install_freesurfer() {
     
     # Download
     print_message "Download FreeSurfer ${FREESURFER_VERSION}..."
-    mkdir -p "$fs_dir"
     # check if DOWNLOAD_URLS["freesurfer"] is pointing to .deb or .rpm and handle accordingly
     case "${DOWNLOAD_URLS[freesurfer]}" in
         *.deb)
+            print_message "Downloading dependendies..."
+            sudo apt update
+            cd ~/Downloads
+            wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libncurses5_6.3-2ubuntu0.1_amd64.deb 
+            sudo apt install ./libtinfo5_6.3-2ubuntu0.1_amd64.deb ./libncurses5_6.3-2ubuntu0.1_amd64.deb
+
             print_message "Downloading FreeSurfer ${FREESURFER_VERSION} (deb package)..."
             wget --progress=bar:force "${DOWNLOAD_URLS[freesurfer]}" -O "/tmp/freesurfer_${FREESURFER_VERSION}.deb"
             sudo dpkg -i "/tmp/freesurfer_${FREESURFER_VERSION}.deb"
@@ -1468,10 +1473,10 @@ EOF
     # Install environment
     if command_exists micromamba || [ -f "${CONDA_DIR}/bin/micromamba" ]; then
         local mamba_cmd="${CONDA_DIR}/bin/micromamba"
-        "$mamba_cmd" env create -f "$env_file" -y
+        "$mamba_cmd" env create -n neuroimaging -f "$env_file" -y
         print_success "Micromamba environment created"
     elif command_exists conda; then
-        conda env create -f "$env_file" -y
+        conda env create -n neuroimaging -f "$env_file" -y
         print_success "Conda environment created"
     else
         print_warning "Conda/Micromamba not found. Installing Miniconda..."
@@ -1502,7 +1507,7 @@ RUN apt-get update && apt-get install -y \
     libqt5widgets5 libqt5opengl5 libqt5svg5-dev \
     libopenblas-dev libfftw3-dev libnifti-dev \
     libtool automake autoconf cmake g++ gcc \
-    perl xfonts-base gnome-tweak-tool \
+    perl xfonts-base \
     libjpeg62 xvfb xterm vim netpbm \
     && rm -rf /var/lib/apt/lists/*
 
