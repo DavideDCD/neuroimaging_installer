@@ -121,6 +121,58 @@ prompt_user() {
 # Check if command exists
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
+# Install executable into /usr/bin with optional sudo fallback
+install_binary_to_usr_bin() {
+    local source_path="$1"
+    local binary_name="$2"
+
+    if [ -w "/usr/bin" ]; then
+        mv "$source_path" "/usr/bin/${binary_name}"
+        chmod +x "/usr/bin/${binary_name}" || true
+    elif command_exists sudo; then
+        sudo mv "$source_path" "/usr/bin/${binary_name}"
+        sudo chmod +x "/usr/bin/${binary_name}" || true
+    else
+        print_error "Cannot write to /usr/bin and sudo not available"
+        return 1
+    fi
+}
+
+# Ensure Docker is installed and the daemon is available
+ensure_docker_running() {
+    if ! command_exists docker; then
+        print_error "Docker not found. Installing Docker..."
+        install_docker
+    fi
+
+    if ! docker info >/dev/null 2>&1; then
+        print_warning "Docker is not running. Starting Docker..."
+        sudo systemctl start docker
+        sleep 3
+        if ! docker info >/dev/null 2>&1; then
+            print_error "Docker cannot be started. Start it manually with: sudo systemctl start docker"
+            return 1
+        fi
+    fi
+}
+
+# Ask user and optionally pre-pull a Docker image in interactive mode
+prompt_pull_docker_image() {
+    local image_name="$1"
+    local image_version="$2"
+    local tool_name="$3"
+
+    if [ "$SILENT_MODE" = false ]; then
+        read -p "Download the Docker image of ${tool_name} ${image_version}? (s/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[SsYy]$ ]]; then
+            print_message "Download image ${tool_name} ${image_version}..."
+            docker pull "${image_name}:${image_version}"
+            print_success "${tool_name} image downloaded"
+        fi
+    fi
+}
+
 # Directory creation
 create_dirs() {
     mkdir -p "$INSTALL_DIR" "$LOG_DIR" "$CONFIG_DIR" "$BACKUP_DIR"
@@ -389,18 +441,9 @@ install_dcm2niix() {
     fi
 
     print_message "Moving dcm2niix to /usr/bin (may require sudo)..."
-    if [ -w "/usr/bin" ]; then
-        mv "$exe_path" /usr/bin/dcm2niix
-        chmod +x /usr/bin/dcm2niix || true
-    else
-        if command_exists sudo; then
-            sudo mv "$exe_path" /usr/bin/dcm2niix
-            sudo chmod +x /usr/bin/dcm2niix || true
-        else
-            print_error "Cannot write to /usr/bin and sudo not available"
-            rm -rf "$extract_dir" "$temp_zip"
-            return 1
-        fi
+    if ! install_binary_to_usr_bin "$exe_path" "dcm2niix"; then
+        rm -rf "$extract_dir" "$temp_zip"
+        return 1
     fi
 
     print_success "dcm2niix installed to /usr/bin/dcm2niix"
@@ -434,18 +477,9 @@ install_dcm2bids() {
     fi
 
     print_message "Moving dcm2bids to /usr/bin (may require sudo)..."
-    if [ -w "/usr/bin" ]; then
-        mv "$exe_path" /usr/bin/dcm2bids
-        chmod +x /usr/bin/dcm2bids || true
-    else
-        if command_exists sudo; then
-            sudo mv "$exe_path" /usr/bin/dcm2bids
-            sudo chmod +x /usr/bin/dcm2bids || true
-        else
-            print_error "Cannot write to /usr/bin and sudo not available"
-            rm -rf "$extract_dir" "$temp_tgz"
-            return 1
-        fi
+    if ! install_binary_to_usr_bin "$exe_path" "dcm2bids"; then
+        rm -rf "$extract_dir" "$temp_tgz"
+        return 1
     fi
 
     print_success "dcm2bids installed to /usr/bin/dcm2bids"
@@ -782,22 +816,8 @@ install_docker() {
 install_fmriprep_docker() {
     print_header "FMRIPREP-DOCKER CONFIGURATION"
 
-    # Verify Docker
-    if ! command_exists docker; then
-        print_error "Docker not found. Installing Docker..."
-        install_docker
-    fi
-
-    # Verify that Docker is running
-    if ! docker info >/dev/null 2>&1; then
-        print_warning "Docker is not running. Starting Docker..."
-        sudo systemctl start docker
-        sleep 3
-        if ! docker info >/dev/null 2>&1; then
-            print_error "Docker cannot be started. Start it manually with: sudo systemctl start docker"
-            return 1
-        fi
-    fi
+    # Verify Docker and daemon availability
+    ensure_docker_running
 
     # Add user to docker group if necessary
     if ! groups | grep -q docker; then
@@ -819,16 +839,7 @@ install_fmriprep_docker() {
 
     # Pre-download fMRIPrep docker image (optional but recommended)
     local fmriprep_version="${FMRIPREP_VERSION}"
-    
-    if [ "$SILENT_MODE" = false ]; then
-        read -p "Download the Docker image of fMRIPrep ${fmriprep_version}? (s/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Ss]$ ]]; then
-            print_message "Download fMRIPrep image ${fmriprep_version}... (this may take time)"
-            docker pull nipreps/fmriprep:${fmriprep_version}
-            print_success "fMRIPrep image downloaded"
-        fi
-    fi
+    prompt_pull_docker_image "nipreps/fmriprep" "$fmriprep_version" "fMRIPrep"
 
     # Create directory for TemplateFlow
     local templateflow_dir="${INSTALL_DIR}/templateflow"
@@ -853,31 +864,12 @@ install_fmriprep_docker() {
 install_mriqc_docker() {
     print_header "MRIQC-DOCKER CONFIGURATION"
     
-    # Verify Docker
-    if ! command_exists docker; then
-        print_error "Docker not found. Installing Docker..."
-        install_docker
-    fi
-    
-    # Verify that Docker is running
-    if ! docker info >/dev/null 2>&1; then
-        print_warning "Docker is not running. Starting Docker..."
-        sudo systemctl start docker
-        sleep 3
-    fi
+    # Verify Docker and daemon availability
+    ensure_docker_running
     
     # Pre-download MRIQC docker image
     local mriqc_version="${MRIQC_VERSION}"
-    
-    if [ "$SILENT_MODE" = false ]; then
-        read -p "Download the Docker image of MRIQC ${mriqc_version}? (y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Ss]$ ]]; then
-            print_message "Download immagine MRIQC ${mriqc_version}..."
-            docker pull nipreps/mriqc:${mriqc_version}
-            print_success "Immagine MRIQC scaricata"
-        fi
-    fi
+    prompt_pull_docker_image "nipreps/mriqc" "$mriqc_version" "MRIQC"
 
     # Configure environment variables
     backup_config ~/.bashrc
@@ -896,31 +888,12 @@ install_mriqc_docker() {
 install_smriprep_docker() {
     print_header "sMRIPrep-DOCKER CONFIGURATION"
     
-    # Verify Docker
-    if ! command_exists docker; then
-        print_error "Docker not found. Installing Docker..."
-        install_docker
-    fi
-    
-    # Verify that Docker is running
-    if ! docker info >/dev/null 2>&1; then
-        print_warning "Docker is not running. Starting Docker..."
-        sudo systemctl start docker
-        sleep 3
-    fi
+    # Verify Docker and daemon availability
+    ensure_docker_running
     
     # Pre-download the Docker image of sMRIPrep
     local smriprep_version="${SMRIPREP_VERSION}"
-    
-    if [ "$SILENT_MODE" = false ]; then
-        read -p "Download the Docker image of sMRIPrep ${smriprep_version}? (y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Ss]$ ]]; then
-            print_message "Download immagine sMRIPrep ${smriprep_version}..."
-            docker pull nipreps/smriprep:${smriprep_version}
-            print_success "Immagine sMRIPrep scaricata"
-        fi
-    fi
+    prompt_pull_docker_image "nipreps/smriprep" "$smriprep_version" "sMRIPrep"
     
     # Create directory for TemplateFlow if it doesn't exist
     local templateflow_dir="${INSTALL_DIR}/templateflow"
